@@ -76,6 +76,27 @@ describe('buildTimeline', () => {
     expect(items.filter((i) => i.kind === 'run')).toHaveLength(3);
   });
 
+  it('adds a time label after a pause of an hour or more on the same day', () => {
+    const items = buildTimeline(
+      [msg('1', alice, at(11, 8, 0)), msg('2', bob, at(11, 8, 30)), msg('3', bob, at(11, 9, 45))],
+      'a',
+      NOW,
+    );
+    expect(items.map((i) => i.kind)).toEqual(['day', 'run', 'run', 'time', 'run']);
+  });
+
+  it('puts the unread divider before the first unread message and starts a new run there', () => {
+    const items = buildTimeline(
+      [msg('1', bob, at(11, 9, 0)), msg('2', bob, at(11, 9, 1)), msg('3', bob, at(11, 9, 2))],
+      'a',
+      NOW,
+      { firstUnreadId: '2' },
+    );
+    expect(items.map((i) => i.kind)).toEqual(['day', 'run', 'unread', 'run']);
+    const runs = items.filter((i) => i.kind === 'run') as any[];
+    expect(runs.map((r) => r.messages.length)).toEqual([1, 2]);
+  });
+
   it('produces unique, stable keys', () => {
     const items = buildTimeline(
       [msg('1', alice, at(10, 9, 0)), msg('2', bob, at(11, 9, 0))],

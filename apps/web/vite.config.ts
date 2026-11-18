@@ -12,7 +12,20 @@ export default defineConfig({
     // The API lives on :4000 in development; in production the same server serves both.
     proxy: { '/graphql': { target: 'http://localhost:4000', ws: true } },
   },
-  build: { sourcemap: false, chunkSizeWarningLimit: 700 },
+  build: {
+    sourcemap: false,
+    chunkSizeWarningLimit: 700,
+    rollupOptions: {
+      output: {
+        // Vendor code changes rarely: separate chunks stay cached across app releases.
+        manualChunks: {
+          react: ['react', 'react-dom', 'react-dom/client', 'react-router'],
+          apollo: ['@apollo/client', 'graphql', 'graphql-ws'],
+          motion: ['motion'],
+        },
+      },
+    },
+  },
   test: {
     environment: 'jsdom',
     globals: true,
