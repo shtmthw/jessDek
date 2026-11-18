@@ -1,10 +1,32 @@
 import { formatClock, formatDayLabel } from './time';
 
+/** A photo or video in a message, as the timeline draws it (from the server, or your own pending send). */
+export interface MediaItem {
+  /** Stable across a send: the local id while pending, the attachment id once confirmed. */
+  key: string;
+  kind: 'IMAGE' | 'VIDEO';
+  width: number;
+  height: number;
+  durationMs?: number | null;
+  mimeType: string;
+  name: string;
+  size: number;
+  thumbhash?: string | null;
+  attachmentId?: string;
+  sha256?: string;
+  posterSha256?: string | null;
+  posterSize?: number | null;
+  posterMime?: string | null;
+  /** Your own pending send: shown from the file on this device. */
+  local?: { previewUrl: string | null; preparing: boolean };
+}
+
 export interface ChatMessage {
   id: string;
   body: string;
   createdAt: string;
   sender: { id: string; displayName: string; avatarColor: string };
+  attachments?: MediaItem[];
 }
 
 export type TimelineItem<M extends ChatMessage = ChatMessage> =

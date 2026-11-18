@@ -2,13 +2,23 @@ import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../src/app.js';
 import { prisma } from '../src/db.js';
 import { signInLimiter } from '../src/services/users.js';
+import { clearRelays } from '../src/relay.js';
+import { clearBlockCache } from '../src/services/blocks.js';
+import { resetMediaState } from '../src/services/media.js';
 import { sendLimiter, typingLimiter } from '../src/services/messages.js';
+import { clearPeers } from '../src/services/peers.js';
 
 export async function resetDb() {
+  await prisma.block.deleteMany();
+  await prisma.attachment.deleteMany();
   await prisma.message.deleteMany();
   await prisma.conversationMember.deleteMany();
   await prisma.conversation.deleteMany();
   await prisma.user.deleteMany();
+  clearBlockCache();
+  clearPeers();
+  resetMediaState();
+  clearRelays();
   signInLimiter.clear();
   sendLimiter.clear();
   typingLimiter.clear();

@@ -10,17 +10,25 @@ import {
   type ReactNode,
 } from 'react';
 import { Avatar } from '@/components/Avatar';
+import { useSharingSummary } from '@/features/media/transfers';
 import { cn } from '@/lib/cn';
 import { prefersReducedMotion } from '@/lib/media';
 import { buildTimeline, type ChatMessage, type TimelineItem } from '@/lib/messages';
 import { exit, spring } from '@/lib/motion';
 import { formatClock } from '@/lib/time';
+import type { Typer } from '../realtime/typing';
+import { bubbleCorners } from './bubbleStyle';
 import { Linkify } from './Linkify';
+import { MediaBubble } from './media/MediaBubble';
+import { ScrollRootContext } from './media/ScrollRoot';
+import { TypingBubble } from './TypingBubble';
 
 /** A message as shown on screen. `id` is a stable key: a sent message keeps the key it had while pending. */
 export interface DisplayMessage extends ChatMessage {
   status?: 'sending' | 'failed' | 'sent';
   tempId?: string;
+  /** Your own photos and videos are still being resized and hashed before they can be sent. */
+  preparing?: boolean;
 }
 
 type Run = Extract<TimelineItem<DisplayMessage>, { kind: 'run' }>;
@@ -49,11 +57,10 @@ function Bubble({
     <div
       onClick={onClick}
       className={cn(
-        'w-fit max-w-[min(80%,clamp(34rem,45%,48rem))] whitespace-pre-wrap break-words rounded-[20px] px-3.5 py-2 text-[15px] leading-[1.42] md:px-4',
+        'w-fit max-w-[min(80%,clamp(34rem,45%,48rem))] whitespace-pre-wrap break-words px-3.5 py-2 text-[15px] leading-[1.42] md:px-4',
         'transition-[border-radius,opacity,background-color] duration-300 ease-out-quint',
         mine ? 'bg-brand text-brand-foreground' : 'bg-bubble text-foreground',
-        mine ? !first && 'rounded-tr-md' : !first && 'rounded-tl-md',
-        mine ? !last && 'rounded-br-md' : !last && 'rounded-bl-md',
+        bubbleCorners(mine, first, last),
         status === 'sending' && 'opacity-70',
         status === 'failed' && 'opacity-60',
         mine
@@ -69,11 +76,14 @@ function Bubble({
 function StatusLine({
   message,
   showDelivery,
+  sharingText,
   onRetry,
   onDiscard,
 }: {
   message: DisplayMessage;
   showDelivery: boolean;
+  /** "Sharing with Bob · 45%" while someone is downloading your photos from this tab. */
+  sharingText?: string | null;
   onRetry: (tempId: string) => void;
   onDiscard: (tempId: string) => void;
 }) {
@@ -88,13 +98,17 @@ function StatusLine({
   const key =
     status === 'failed'
       ? 'failed'
-      : !showDelivery
-        ? null
-        : status === 'sending'
-          ? slow
-            ? 'sending'
-            : null
-          : (status ?? null);
+      : status === 'sending' && message.preparing
+        ? 'preparing' // no delay: resizing a photo is slow enough to deserve a word at once
+        : sharingText
+          ? 'sharing' // shown on any of your media messages, not just the newest
+          : !showDelivery
+            ? null
+            : status === 'sending'
+              ? slow
+                ? 'sending'
+                : null
+              : (status ?? null);
   // One label at a time, in one grid cell under its bubble: the old one leaves before the next
   // arrives. When the line goes away entirely (a newer message took over), it leaves at once.
   const leave = {
@@ -133,17 +147,17 @@ function StatusLine({
               <X className="size-3" />
             </button>
           </motion.div>
-        ) : key === 'sending' ? (
+        ) : key === 'sending' || key === 'preparing' || key === 'sharing' ? (
           <motion.span
-            key="sending"
-            className="col-start-1 row-start-1 px-1 pt-1 text-[11px] text-muted-foreground"
+            key={key}
+            className="tabular col-start-1 row-start-1 px-1 pt-1 text-[11px] text-muted-foreground"
             variants={leave}
             custom={key}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1, transition: { duration: 0.2 } }}
             exit="exit"
           >
-            Sending…
+            {key === 'sending' ? 'Sending…' : key === 'preparing' ? 'Preparing…' : sharingText}
           </motion.span>
         ) : key === 'sent' ? (
           <motion.span
@@ -173,6 +187,20 @@ function StatusLine({
   );
 }
 
+/** "Sharing with Bob · 45%", or "Sharing with 2 people". */
+function sharingLabel(
+  sharing: { peers: string[]; progress: number } | undefined,
+  nameOf: (userId: string) => string | undefined,
+): string | null {
+  if (!sharing) return null;
+  if (sharing.peers.length === 1) {
+    const name = nameOf(sharing.peers[0]!)?.split(' ')[0];
+    const pct = `${Math.round(sharing.progress * 100)}%`;
+    return name ? `Sharing with ${name} · ${pct}` : `Sharing with 1 person · ${pct}`;
+  }
+  return `Sharing with ${sharing.peers.length} people`;
+}
+
 function MessageRow({
   message,
   mine,
@@ -180,6 +208,10 @@ function MessageRow({
   last,
   fresh,
   showDelivery,
+  conversationId,
+  isGroup,
+  memberName,
+  onOpenMedia,
   onRetry,
   onDiscard,
 }: {
@@ -189,13 +221,21 @@ function MessageRow({
   last: boolean;
   fresh: boolean;
   showDelivery: boolean;
+  conversationId: string;
+  isGroup: boolean;
+  memberName: (userId: string) => string | undefined;
+  onOpenMedia: (messageId: string, index: number) => void;
   onRetry: (tempId: string) => void;
   onDiscard: (tempId: string) => void;
 }) {
   const [reveal, setReveal] = useState(false);
+  const media = message.attachments?.length ? message.attachments : null;
+  const sharing = useSharingSummary(
+    mine && media ? media.flatMap((m) => [m.sha256, m.posterSha256 ?? undefined]) : [],
+  );
 
   // Tap (or click) a bubble to pin its time; links and text selection keep working as usual.
-  function toggle(e: MouseEvent<HTMLDivElement>) {
+  function toggle(e: MouseEvent<HTMLElement>) {
     if ((e.target as HTMLElement).closest('a')) return;
     if (window.getSelection()?.toString()) return;
     setReveal((r) => !r);
@@ -213,14 +253,30 @@ function MessageRow({
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={mine ? spring.send : spring.soft}
       >
-        <Bubble
-          text={message.body}
-          mine={mine}
-          first={first}
-          last={last}
-          status={message.status}
-          onClick={toggle}
-        />
+        {media ? (
+          <MediaBubble
+            items={media}
+            caption={message.body}
+            mine={mine}
+            first={first}
+            last={last}
+            failed={message.status === 'failed'}
+            conversationId={conversationId}
+            who={{ dm: !isGroup, mine, firstName: message.sender.displayName.split(' ')[0] ?? '' }}
+            senderName={message.sender.displayName}
+            onToggleTime={toggle}
+            onOpen={(index) => onOpenMedia(message.id, index)}
+          />
+        ) : (
+          <Bubble
+            text={message.body}
+            mine={mine}
+            first={first}
+            last={last}
+            status={message.status}
+            onClick={toggle}
+          />
+        )}
         {message.status === 'failed' ? (
           <AlertCircle className="size-4 shrink-0 text-danger" aria-hidden />
         ) : (
@@ -238,35 +294,11 @@ function MessageRow({
       <StatusLine
         message={message}
         showDelivery={showDelivery}
+        sharingText={sharingLabel(sharing, memberName)}
         onRetry={onRetry}
         onDiscard={onDiscard}
       />
     </div>
-  );
-}
-
-function TypingBubble({ indent }: { indent: boolean }) {
-  return (
-    <motion.div
-      aria-hidden
-      className="mt-3 flex items-end gap-2"
-      style={{ transformOrigin: '0% 100%' }}
-      initial={{ opacity: 0, y: 8, scale: 0.85 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.85, transition: exit.fast }}
-      transition={spring.soft}
-    >
-      {indent ? <span className="w-7 shrink-0" /> : null}
-      <span className="inline-flex h-9 items-center gap-1 rounded-[20px] bg-bubble px-4">
-        {[0, 1, 2].map((i) => (
-          <span
-            key={i}
-            className="typing-dot size-1.5 rounded-full bg-muted-foreground"
-            style={{ animationDelay: `${i * 150}ms` }}
-          />
-        ))}
-      </span>
-    </motion.div>
   );
 }
 
@@ -293,6 +325,9 @@ function Separator({ item }: { item: Exclude<TimelineItem, { kind: 'run' | 'day'
 export function MessageList({
   messages,
   viewerId,
+  conversationId,
+  memberName,
+  onOpenMedia,
   isGroup,
   hasMore,
   loadingMore,
@@ -306,14 +341,19 @@ export function MessageList({
 }: {
   messages: DisplayMessage[];
   viewerId: string;
+  conversationId: string;
+  /** A member's display name by user id (for "Sharing with Bob"). */
+  memberName: (userId: string) => string | undefined;
+  /** A photo or video tile was tapped: which message, and which of its attachments. */
+  onOpenMedia: (messageId: string, index: number) => void;
   isGroup: boolean;
   hasMore: boolean;
   loadingMore: boolean;
   onLoadMore: () => void;
   onRetry: (tempId: string) => void;
   onDiscard: (tempId: string) => void;
-  /** Names of people typing right now. */
-  typing: string[];
+  /** People typing right now. */
+  typing: Typer[];
   firstUnreadId?: string;
   /** Shown above the first message once the whole history is loaded. */
   intro?: ReactNode;
@@ -486,6 +526,10 @@ export function MessageList({
               last={i === run.messages.length - 1}
               fresh={isFresh(m)}
               showDelivery={m === lastMessage}
+              conversationId={conversationId}
+              isGroup={isGroup}
+              memberName={memberName}
+              onOpenMedia={onOpenMedia}
               onRetry={onRetry}
               onDiscard={onDiscard}
             />
@@ -496,83 +540,85 @@ export function MessageList({
   }
 
   return (
-    <div className="relative min-h-0 flex-1">
-      <div
-        ref={scroller}
-        onScroll={onScroll}
-        className="h-full overflow-y-auto overscroll-contain"
-        role="log"
-        aria-live="polite"
-        aria-label="Messages"
-      >
-        <div className="chat-column flex min-h-full flex-col justify-end pb-3 pt-2">
-          <div ref={topSentinel} className="h-px shrink-0" />
-          {loadingMore ? (
-            <div className="flex justify-center py-3 text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" aria-label="Loading earlier messages" />
-            </div>
-          ) : !hasMore && messages.length > 0 ? (
-            intro
-          ) : null}
-
-          {messages.length === 0 ? empty : null}
-
-          {sections.map((section) => (
-            <div key={section.key} role="group" aria-label={section.label}>
-              <div className="pointer-events-none sticky top-0 z-10 flex justify-center py-2.5">
-                <span className="rounded-full bg-background/85 px-3 py-1 text-xs font-medium text-muted-foreground shadow-sm ring-1 ring-border backdrop-blur-md">
-                  {section.label}
-                </span>
+    <ScrollRootContext.Provider value={scroller}>
+      <div className="relative min-h-0 flex-1">
+        <div
+          ref={scroller}
+          onScroll={onScroll}
+          className="h-full overflow-y-auto overscroll-contain"
+          role="log"
+          aria-live="polite"
+          aria-label="Messages"
+        >
+          <div className="chat-column flex min-h-full flex-col justify-end pb-3 pt-2">
+            <div ref={topSentinel} className="h-px shrink-0" />
+            {loadingMore ? (
+              <div className="flex justify-center py-3 text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" aria-label="Loading earlier messages" />
               </div>
-              {section.items.map((item) =>
-                item.kind === 'run' ? (
-                  renderRun(item)
-                ) : item.kind === 'day' ? null : (
-                  <Separator key={item.key} item={item} />
-                ),
-              )}
-            </div>
-          ))}
+            ) : !hasMore && messages.length > 0 ? (
+              intro
+            ) : null}
 
-          <AnimatePresence>
-            {someoneTyping ? <TypingBubble key="typing" indent={isGroup} /> : null}
-          </AnimatePresence>
+            {messages.length === 0 ? empty : null}
+
+            {sections.map((section) => (
+              <div key={section.key} role="group" aria-label={section.label}>
+                <div className="pointer-events-none sticky top-0 z-10 flex justify-center py-2.5">
+                  <span className="rounded-full bg-background/85 px-3 py-1 text-xs font-medium text-muted-foreground shadow-sm ring-1 ring-border backdrop-blur-md">
+                    {section.label}
+                  </span>
+                </div>
+                {section.items.map((item) =>
+                  item.kind === 'run' ? (
+                    renderRun(item)
+                  ) : item.kind === 'day' ? null : (
+                    <Separator key={item.key} item={item} />
+                  ),
+                )}
+              </div>
+            ))}
+
+            <AnimatePresence>
+              {someoneTyping ? <TypingBubble key="typing" typers={typing} group={isGroup} /> : null}
+            </AnimatePresence>
+          </div>
         </div>
-      </div>
 
-      <AnimatePresence>
-        {unseen > 0 ? (
-          <motion.button
-            key="unseen"
-            onClick={() => {
-              scrollToBottom(true);
-              setUnseen(0);
-            }}
-            className="absolute bottom-3 left-1/2 inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-brand px-3.5 py-2 text-sm font-medium text-brand-foreground shadow-md"
-            initial={{ opacity: 0, y: 12, scale: 0.9 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 8, scale: 0.95, transition: exit.fast }}
-            transition={spring.pop}
-          >
-            <ArrowDown className="size-4" />
-            {unseen === 1 ? '1 new message' : `${unseen} new messages`}
-          </motion.button>
-        ) : far ? (
-          <motion.button
-            key="latest"
-            aria-label="Jump to latest message"
-            title="Jump to latest"
-            onClick={() => scrollToBottom(true)}
-            className="absolute bottom-3 right-4 inline-flex size-10 items-center justify-center rounded-full bg-background text-muted-foreground shadow-md ring-1 ring-border hover:text-foreground md:right-6"
-            initial={{ opacity: 0, y: 12, scale: 0.8 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.8, transition: exit.fast }}
-            transition={spring.pop}
-          >
-            <ArrowDown className="size-[18px]" />
-          </motion.button>
-        ) : null}
-      </AnimatePresence>
-    </div>
+        <AnimatePresence>
+          {unseen > 0 ? (
+            <motion.button
+              key="unseen"
+              onClick={() => {
+                scrollToBottom(true);
+                setUnseen(0);
+              }}
+              className="absolute bottom-3 left-1/2 inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-brand px-3.5 py-2 text-sm font-medium text-brand-foreground shadow-md"
+              initial={{ opacity: 0, y: 12, scale: 0.9 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 8, scale: 0.95, transition: exit.fast }}
+              transition={spring.pop}
+            >
+              <ArrowDown className="size-4" />
+              {unseen === 1 ? '1 new message' : `${unseen} new messages`}
+            </motion.button>
+          ) : far ? (
+            <motion.button
+              key="latest"
+              aria-label="Jump to latest message"
+              title="Jump to latest"
+              onClick={() => scrollToBottom(true)}
+              className="absolute bottom-3 right-4 inline-flex size-10 items-center justify-center rounded-full bg-background text-muted-foreground shadow-md ring-1 ring-border hover:text-foreground md:right-6"
+              initial={{ opacity: 0, y: 12, scale: 0.8 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.8, transition: exit.fast }}
+              transition={spring.pop}
+            >
+              <ArrowDown className="size-[18px]" />
+            </motion.button>
+          ) : null}
+        </AnimatePresence>
+      </div>
+    </ScrollRootContext.Provider>
   );
 }

@@ -1,10 +1,15 @@
 import type { User } from '@prisma/client';
+import { filter, pipe } from 'graphql-yoga';
 import { requireUser, type Context } from './context.js';
 import { signSession } from './auth.js';
+import { config } from './config.js';
 import { fail } from './errors.js';
 import { pubsub, userTopic } from './pubsub.js';
 import * as conversations from './services/conversations.js';
+import * as media from './services/media.js';
 import * as messages from './services/messages.js';
+import { blockedBetween, listBlocked } from './services/blocks.js';
+import * as safety from './services/safety.js';
 import { isOnline } from './services/presence.js';
 import * as users from './services/users.js';
 import type { MessageWithSender, ServerEvent } from './types.js';
@@ -26,6 +31,8 @@ export const resolvers = {
     ) => messages.listMessages(requireUser(ctx), args.conversationId, args.before, args.limit),
     searchUsers: (_: unknown, { query }: { query: string }, ctx: Context) =>
       users.searchUsers(requireUser(ctx), query),
+    mediaConfig: (_: unknown, __: unknown, ctx: Context) => (requireUser(ctx), { ...config.media }),
+    blockedUsers: (_: unknown, __: unknown, ctx: Context) => listBlocked(requireUser(ctx)),
   },
 
   Mutation: {
@@ -60,9 +67,37 @@ export const resolvers = {
       conversations.renameGroup(requireUser(ctx), args.conversationId, args.name),
     leaveGroup: (_: unknown, { conversationId }: { conversationId: string }, ctx: Context) =>
       conversations.leaveGroup(requireUser(ctx), conversationId),
+    removeMember: (_: unknown, args: { conversationId: string; userId: string }, ctx: Context) =>
+      conversations.removeMember(requireUser(ctx), args.conversationId, args.userId),
+    hideConversation: (_: unknown, { conversationId }: { conversationId: string }, ctx: Context) =>
+      conversations.hideConversation(requireUser(ctx), conversationId),
+    muteConversation: (
+      _: unknown,
+      args: { conversationId: string; muted: boolean },
+      ctx: Context,
+    ) => conversations.muteConversation(requireUser(ctx), args.conversationId, args.muted),
+    blockUser: (_: unknown, { userId }: { userId: string }, ctx: Context) =>
+      safety.blockUser(requireUser(ctx), userId),
+    unblockUser: (_: unknown, { userId }: { userId: string }, ctx: Context) =>
+      safety.unblockUser(requireUser(ctx), userId),
 
-    sendMessage: (_: unknown, args: { conversationId: string; body: string }, ctx: Context) =>
-      messages.sendMessage(requireUser(ctx), args.conversationId, args.body),
+    sendMessage: (
+      _: unknown,
+      args: { conversationId: string; body: string; attachments?: unknown },
+      ctx: Context,
+    ) => messages.sendMessage(requireUser(ctx), args.conversationId, args.body, args.attachments),
+    requestMedia: (
+      _: unknown,
+      args: { attachmentId: string; part: 'FILE' | 'POSTER' },
+      ctx: Context,
+    ) => media.requestMedia(ctx, args.attachmentId, args.part),
+    sendSignal: (_: unknown, { input }: { input: unknown }, ctx: Context) =>
+      media.sendSignal(ctx, input),
+    openRelay: (
+      _: unknown,
+      args: { requestId: string; holderPeerId: string; key?: string | null },
+      ctx: Context,
+    ) => media.openRelay(ctx, args.requestId, args.holderPeerId, args.key),
     markRead: (_: unknown, { conversationId }: { conversationId: string }, ctx: Context) =>
       conversations.markRead(requireUser(ctx), conversationId),
     setTyping: (_: unknown, { conversationId }: { conversationId: string }, ctx: Context) =>
@@ -73,7 +108,12 @@ export const resolvers = {
     events: {
       subscribe: (_: unknown, __: unknown, ctx: Context) => {
         if (!ctx.userId) throw fail('UNAUTHENTICATED', 'Please sign in to continue');
-        return pubsub.subscribe(userTopic(ctx.userId));
+        const me = ctx.peerId;
+        // Peer-targeted events (media requests and signals) reach only the tab they name.
+        return pipe(
+          pubsub.subscribe(userTopic(ctx.userId)),
+          filter((e: ServerEvent) => !('toPeerId' in e) || e.toPeerId === me),
+        );
       },
       resolve: (event: ServerEvent) => event,
     },
@@ -89,11 +129,16 @@ export const resolvers = {
       ctx.userId ? conversations.getConversation(ctx.userId, event.conversationId) : null,
   },
 
-  PresenceChanged: { lastSeenAt: (e: { lastSeenAt: Date }) => iso(e.lastSeenAt) },
+  PresenceChanged: {
+    lastSeenAt: (e: { lastSeenAt: Date | null }) => (e.lastSeenAt ? iso(e.lastSeenAt) : null),
+  },
 
   User: {
-    online: (u: User) => isOnline(u.id),
-    lastSeenAt: (u: User) => iso(u.lastSeenAt),
+    // Presence never crosses a block, in either direction.
+    online: async (u: User, _: unknown, ctx: Context) =>
+      ctx.userId && (await blockedBetween(ctx.userId, u.id)) ? false : isOnline(u.id),
+    lastSeenAt: async (u: User, _: unknown, ctx: Context) =>
+      ctx.userId && (await blockedBetween(ctx.userId, u.id)) ? null : iso(u.lastSeenAt),
   },
 
   Conversation: {
@@ -103,5 +148,6 @@ export const resolvers = {
 
   Message: {
     createdAt: (m: MessageWithSender) => iso(m.createdAt),
+    attachments: (m: MessageWithSender) => m.attachments ?? [],
   },
 };

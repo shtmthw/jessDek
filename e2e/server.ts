@@ -22,6 +22,8 @@ export function webServer(port: number, databaseUrl: string) {
       PORT: String(port),
       DATABASE_URL: databaseUrl,
       JWT_SECRET: 'e2e-secret-e2e-secret-e2e-secret',
+      // No external STUN in CI: browsers on one machine connect over host candidates.
+      ICE_SERVERS: '[]',
     },
   };
 }
@@ -35,7 +37,7 @@ export function resetDatabase(databaseUrl: string) {
     stdio: 'pipe',
   });
   execSync(
-    `npx prisma db execute --schema apps/server/prisma/schema.prisma --stdin <<< 'TRUNCATE "Message","ConversationMember","Conversation","User" CASCADE;'`,
+    `npx prisma db execute --schema apps/server/prisma/schema.prisma --stdin <<< 'TRUNCATE "Attachment","Message","ConversationMember","Conversation","User" CASCADE;'`,
     { cwd: root, env, stdio: 'pipe', shell: '/bin/bash' },
   );
 }

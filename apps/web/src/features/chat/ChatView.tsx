@@ -1,24 +1,55 @@
 import { useApolloClient, useMutation, useQuery } from '@apollo/client';
-import { ArrowLeft, Info, MessageSquareOff } from 'lucide-react';
+import {
+  ArrowLeft,
+  Ban,
+  Bell,
+  BellOff,
+  Info,
+  MessageSquareOff,
+  MoreHorizontal,
+  ShieldCheck,
+  Trash2,
+} from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { toast } from 'sonner';
 import { Avatar } from '@/components/Avatar';
 import { Button, buttonClass } from '@/components/Button';
+import { Menu, MenuItem, MenuSeparator } from '@/components/Menu';
 import { Skeleton } from '@/components/Skeleton';
+import { useMediaConfig } from '@/features/media/config';
+import { PrepareError, toInput, type PreparedAttachment } from '@/features/media/prepare';
+import * as mediaStore from '@/features/media/store';
+import { addFiles, trackUnsent, type TrayItem } from '@/features/media/trayStore';
 import { cn } from '@/lib/cn';
-import { CONVERSATIONS, MARK_READ, MESSAGES, SEND_MESSAGE, SET_TYPING } from '@/lib/gql';
+import {
+  CONVERSATIONS,
+  MARK_READ,
+  MESSAGES,
+  SEND_MESSAGE,
+  SET_TYPING,
+  type Message,
+} from '@/lib/gql';
 import { useIsDesktop } from '@/lib/media';
 import { easeOut, exit, spring } from '@/lib/motion';
 import { formatLastSeen } from '@/lib/time';
 import { getActiveConversation, setActiveConversation } from '../realtime/active';
 import { applyMessage } from '../realtime/EventsProvider';
-import { useTypingNames } from '../realtime/typing';
+import { useTypers } from '../realtime/typing';
 import { useViewer } from '../session/ViewerProvider';
 import { Composer } from './Composer';
 import { GroupInfoDialog } from './GroupInfoDialog';
+import { DropOverlay } from './media/DropOverlay';
+import { fromAttachment, fromTray } from './media/items';
+import type { ViewerEntry } from './media/MediaViewer';
+import { OpenMediaContext } from './media/ViewerContext';
+import { useFileDrop } from './media/useFileDrop';
+import { useChatActions } from './useChatActions';
 import { MessageList, type DisplayMessage } from './MessageList';
+
+// The viewer is its own chunk: it only loads the first time someone opens a photo or video.
+const MediaViewer = lazy(() => import('./media/MediaViewer'));
 
 const PAGE_SIZE = 30;
 const TYPING_THROTTLE_MS = 2500;
@@ -33,7 +64,20 @@ interface PendingMessage {
   realId?: string;
   /** The newest real message when this was sent; its echo can only arrive after that. */
   after?: string;
+  /** Photos and videos from the tray. They arrive with the message and belong to it from here on. */
+  attachments?: TrayItem[];
+  /** Same files, once resized and hashed. Known only after preparing, and before the send. */
+  prepared?: PreparedAttachment[];
 }
+
+const sameShas = (a: string[], b: string[]) =>
+  a.length === b.length && a.every((s, i) => s === b[i]);
+
+/** A real message as the timeline draws it (server attachments become tiles). */
+const toDisplay = (m: Message): DisplayMessage => ({
+  ...m,
+  attachments: m.attachments.length ? m.attachments.map(fromAttachment) : undefined,
+});
 
 const isWindowActive = () => document.visibilityState === 'visible' && document.hasFocus();
 const firstName = (name: string) => name.split(' ')[0] ?? name;
@@ -91,6 +135,9 @@ function ChatScreen({ id }: { id: string }) {
   const desktop = useIsDesktop();
   const [infoOpen, setInfoOpen] = useState(false);
   const [pending, setPending] = useState<PendingMessage[]>([]);
+  const [lightbox, setLightbox] = useState<{ messageId: string; index: number } | null>(null);
+  const mediaEnabled = useMediaConfig()?.enabled !== false;
+  const actions = useChatActions();
   const queue = useRef<Promise<void>>(Promise.resolve());
   const lastTypingPing = useRef(0);
   /** Confirmed message id → the temporary key it was shown under, so a send never re-animates. */
@@ -111,7 +158,8 @@ function ChatScreen({ id }: { id: string }) {
   const [setTyping] = useMutation(SET_TYPING);
   const [markRead] = useMutation(MARK_READ);
   const [loadingMore, setLoadingMore] = useState(false);
-  const typingNames = useTypingNames(id);
+  const typers = useTypers(id);
+  const typingNames = useMemo(() => typers.map((t) => t.name), [typers]);
 
   // Remember how much was unread when the chat opened, before marking it read clears the count.
   const unreadAtOpen = useRef<number | null>(null);
@@ -167,9 +215,20 @@ function ChatScreen({ id }: { id: string }) {
     for (const p of pending) {
       if (p.status !== 'sending' || claimed.has(p.tempId)) continue;
       const start = p.after ? ids.indexOf(p.after) + 1 : 0;
-      const echo = messages
-        .slice(start)
-        .find((m) => m.sender.id === viewer.id && m.body === p.body && !aliased.has(m.id));
+      // Matching on the text alone would swap two captionless photos, so the files must match too.
+      // A send with media can only be paired once its files have been hashed.
+      if (p.attachments && !p.prepared) continue;
+      const shas = p.prepared?.map((a) => a.sha256) ?? [];
+      const echo = messages.slice(start).find(
+        (m) =>
+          m.sender.id === viewer.id &&
+          m.body === p.body &&
+          sameShas(
+            m.attachments.map((a) => a.sha256),
+            shas,
+          ) &&
+          !aliased.has(m.id),
+      );
       if (echo) {
         aliased.set(echo.id, p.tempId);
         claimed.add(p.tempId);
@@ -178,10 +237,11 @@ function ChatScreen({ id }: { id: string }) {
     // Temp keys whose confirmed message is already in the list.
     const onScreen = new Set<string>();
     const out: DisplayMessage[] = messages.map((m) => {
+      const shown = toDisplay(m);
       const key = aliased.get(m.id);
-      if (!key) return m;
+      if (!key) return shown;
       onScreen.add(key);
-      return { ...m, id: key, tempId: key, status: 'sent' as const };
+      return { ...shown, id: key, tempId: key, status: 'sent' as const };
     });
     const sender = {
       id: viewer.id,
@@ -197,6 +257,8 @@ function ChatScreen({ id }: { id: string }) {
         createdAt: p.createdAt,
         sender,
         status: p.status === 'failed' ? 'failed' : 'sending',
+        preparing: p.attachments && !p.prepared ? true : undefined,
+        attachments: p.attachments?.map((item, i) => fromTray(item, p.prepared?.[i])),
       });
     }
     return { display: out, onScreen };
@@ -217,37 +279,77 @@ function ChatScreen({ id }: { id: string }) {
       .finally(() => setLoadingMore(false));
   }, [messages, loadingMore, fetchMore, id]);
 
-  async function dispatch(tempId: string, body: string) {
+  /** Your files are held for others to download while the send is in flight. */
+  function holdForSharing(prepared: PreparedAttachment[]) {
+    for (const a of prepared) {
+      mediaStore.holdInMemory(a.sha256, a.file, id);
+      if (a.kind === 'VIDEO') {
+        mediaStore.holdInMemory(a.poster.sha256, a.poster.blob, id, true);
+        mediaStore.registerUrl(a.poster.sha256, a.previewUrl); // the bubble keeps the same picture
+      } else mediaStore.registerUrl(a.sha256, a.previewUrl);
+    }
+  }
+
+  async function dispatch(tempId: string, body: string, items?: TrayItem[]) {
     try {
-      const { data: sent } = await sendMessage({ variables: { conversationId: id, body } });
+      let prepared: PreparedAttachment[] | undefined;
+      if (items?.length) {
+        prepared = await Promise.all(items.map((i) => i.done));
+        holdForSharing(prepared);
+        setPending((p) => p.map((x) => (x.tempId === tempId ? { ...x, prepared } : x)));
+      }
+      const { data: sent } = await sendMessage({
+        variables: { conversationId: id, body, attachments: prepared?.map(toInput) },
+      });
       if (!sent) return;
       const realId = sent.sendMessage.id;
       const alreadyPaired = [...aliases.current.values()].includes(tempId);
       if (!alreadyPaired && !aliases.current.has(realId)) aliases.current.set(realId, tempId);
       setPending((p) => p.map((x) => (x.tempId === tempId ? { ...x, status: 'sent', realId } : x)));
       applyMessage(client, viewer.id, sent.sendMessage);
+      // Now that the server has the message, keep the files on this device for others to fetch.
+      if (prepared) {
+        await Promise.all(
+          prepared.flatMap((a) => [
+            mediaStore.persist(a.sha256, id, 'sent'),
+            a.kind === 'VIDEO' ? mediaStore.persist(a.poster.sha256, id, 'sent') : undefined,
+          ]),
+        ).catch(() => undefined); // out of space: it stays shareable from memory for this session
+      }
     } catch (err) {
-      const message = (err as { graphQLErrors?: Array<{ message: string }> }).graphQLErrors?.[0]
-        ?.message;
+      const message =
+        err instanceof PrepareError
+          ? err.message
+          : (err as { graphQLErrors?: Array<{ message: string }> }).graphQLErrors?.[0]?.message;
       if (message) toast.error(message);
       setPending((p) => p.map((x) => (x.tempId === tempId ? { ...x, status: 'failed' } : x)));
+    } finally {
+      if (items?.length) trackUnsent(-1);
     }
   }
 
   // Sends are queued so messages reach the server in the order they were typed.
-  const enqueue = (tempId: string, body: string) => {
-    queue.current = queue.current.then(() => dispatch(tempId, body));
+  const enqueue = (tempId: string, body: string, items?: TrayItem[]) => {
+    if (items?.length) trackUnsent(1);
+    queue.current = queue.current.then(() => dispatch(tempId, body, items));
   };
 
-  function send(body: string) {
+  function send(body: string, items?: TrayItem[]) {
     lastTypingPing.current = 0; // the next keystroke should announce typing again
     const tempId = `pending-${Date.now()}-${pendingCounter++}`;
     const after = messages[messages.length - 1]?.id;
     setPending((p) => [
       ...p,
-      { tempId, body, status: 'sending', createdAt: new Date().toISOString(), after },
+      {
+        tempId,
+        body,
+        status: 'sending',
+        createdAt: new Date().toISOString(),
+        after,
+        attachments: items?.length ? items : undefined,
+      },
     ]);
-    enqueue(tempId, body);
+    enqueue(tempId, body, items);
   }
 
   function retry(tempId: string) {
@@ -255,7 +357,17 @@ function ChatScreen({ id }: { id: string }) {
     if (!item) return;
     const after = messages[messages.length - 1]?.id;
     setPending((p) => p.map((x) => (x.tempId === tempId ? { ...x, status: 'sending', after } : x)));
-    enqueue(tempId, item.body);
+    enqueue(tempId, item.body, item.attachments);
+  }
+
+  function discard(tempId: string) {
+    const item = pending.find((p) => p.tempId === tempId);
+    for (const a of item?.prepared ?? []) {
+      mediaStore.releaseMemory(a.sha256);
+      if (a.kind === 'VIDEO') mediaStore.releaseMemory(a.poster.sha256);
+    }
+    for (const i of item?.attachments ?? []) if (i.previewUrl) URL.revokeObjectURL(i.previewUrl);
+    setPending((p) => p.filter((x) => x.tempId !== tempId));
   }
 
   function typingPing() {
@@ -264,6 +376,41 @@ function ChatScreen({ id }: { id: string }) {
     lastTypingPing.current = now;
     void setTyping({ variables: { conversationId: id } }).catch(() => undefined);
   }
+
+  // Every photo and video loaded in this chat, oldest first, for the viewer.
+  const viewerEntries = useMemo<ViewerEntry[]>(
+    () =>
+      display.flatMap((m) =>
+        (m.attachments ?? []).map((item) => ({
+          item,
+          messageId: m.id,
+          senderName: m.sender.displayName,
+          senderColor: m.sender.avatarColor,
+          createdAt: m.createdAt,
+          caption: m.body,
+        })),
+      ),
+    [display],
+  );
+  const viewerIndex = lightbox
+    ? viewerEntries.findIndex((e) => e.messageId === lightbox.messageId) + lightbox.index
+    : -1;
+  function stepViewer(flat: number) {
+    const entry = viewerEntries[flat];
+    if (!entry) return;
+    const first = viewerEntries.findIndex((e) => e.messageId === entry.messageId);
+    setLightbox({ messageId: entry.messageId, index: flat - first });
+  }
+
+  // Warm the viewer's code as soon as there's something to open, so the first tap isn't a wait.
+  const hasMedia = viewerEntries.length > 0;
+  useEffect(() => {
+    if (hasMedia) void import('./media/MediaViewer');
+  }, [hasMedia]);
+
+  const drop = useFileDrop((files) => {
+    if (mediaEnabled) addFiles(id, files);
+  });
 
   if (!conversation) {
     if (listLoading) {
@@ -288,11 +435,13 @@ function ChatScreen({ id }: { id: string }) {
   const typingText = typingLabel(typingNames);
   const subtitle = isGroup
     ? `${conversation.members.length} members`
-    : peer?.online
-      ? 'Online'
-      : peer
-        ? formatLastSeen(peer.lastSeenAt)
-        : '';
+    : conversation.blockedByMe
+      ? 'Blocked'
+      : peer?.online
+        ? 'Online'
+        : peer?.lastSeenAt
+          ? formatLastSeen(peer.lastSeenAt)
+          : '';
 
   const identity = (
     <>
@@ -361,8 +510,9 @@ function ChatScreen({ id }: { id: string }) {
 
   return (
     <motion.section
-      className="flex h-full min-h-0 flex-col"
+      className="relative flex h-full min-h-0 flex-col"
       aria-label={`Chat with ${conversation.title}`}
+      {...(mediaEnabled ? drop.handlers : {})}
       initial={desktop ? { opacity: 0 } : false}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.2, ease: easeOut }}
@@ -386,17 +536,45 @@ function ChatScreen({ id }: { id: string }) {
         ) : (
           <div className="flex min-w-0 flex-1 items-center gap-3 px-1.5 py-1.5">{identity}</div>
         )}
-        {isGroup ? (
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Group info"
-            title="Group info"
-            onClick={() => setInfoOpen(true)}
-          >
-            <Info className="size-5" />
-          </Button>
+        {conversation.muted ? (
+          <BellOff className="size-4 shrink-0 text-muted-foreground" aria-label="Muted" />
         ) : null}
+        <Menu
+          trigger={
+            <Button variant="ghost" size="icon" aria-label="Chat options" title="Chat options">
+              <MoreHorizontal className="size-5" />
+            </Button>
+          }
+        >
+          {isGroup ? (
+            <MenuItem icon={Info} onSelect={() => setInfoOpen(true)}>
+              Group info
+            </MenuItem>
+          ) : null}
+          <MenuItem
+            icon={conversation.muted ? Bell : BellOff}
+            onSelect={() => void actions.mute(conversation, !conversation.muted)}
+          >
+            {conversation.muted ? 'Unmute notifications' : 'Mute notifications'}
+          </MenuItem>
+          {peer ? (
+            <>
+              <MenuSeparator />
+              {conversation.blockedByMe ? (
+                <MenuItem icon={ShieldCheck} onSelect={() => void actions.unblock(peer)}>
+                  Unblock {firstName(peer.displayName)}
+                </MenuItem>
+              ) : (
+                <MenuItem icon={Ban} danger onSelect={() => void actions.block(peer)}>
+                  Block {firstName(peer.displayName)}
+                </MenuItem>
+              )}
+              <MenuItem icon={Trash2} danger onSelect={() => void actions.hide(conversation)}>
+                Remove chat
+              </MenuItem>
+            </>
+          ) : null}
+        </Menu>
       </header>
 
       {error && !data ? (
@@ -413,33 +591,87 @@ function ChatScreen({ id }: { id: string }) {
       ) : loading && !data ? (
         <MessagesSkeleton />
       ) : (
-        <MessageList
-          messages={display}
-          viewerId={viewer.id}
-          isGroup={isGroup}
-          hasMore={hasMore}
-          loadingMore={loadingMore}
-          onLoadMore={loadMore}
-          onRetry={retry}
-          onDiscard={(tempId) => setPending((p) => p.filter((x) => x.tempId !== tempId))}
-          typing={typingNames}
-          firstUnreadId={firstUnread.current ?? undefined}
-          intro={intro}
-          empty={empty}
-        />
+        <OpenMediaContext.Provider
+          value={viewerIndex >= 0 ? (viewerEntries[viewerIndex]?.item.key ?? null) : null}
+        >
+          <MessageList
+            messages={display}
+            viewerId={viewer.id}
+            conversationId={id}
+            memberName={(userId) => conversation.members.find((m) => m.id === userId)?.displayName}
+            onOpenMedia={(messageId, index) => setLightbox({ messageId, index })}
+            isGroup={isGroup}
+            hasMore={hasMore}
+            loadingMore={loadingMore}
+            onLoadMore={loadMore}
+            onRetry={retry}
+            onDiscard={discard}
+            typing={typers}
+            firstUnreadId={firstUnread.current ?? undefined}
+            intro={intro}
+            empty={empty}
+          />
+        </OpenMediaContext.Provider>
       )}
 
-      <Composer
-        key={id}
-        draftKey={id}
-        autoFocus
-        onSend={send}
-        onTyping={typingPing}
-        placeholder={`Message ${isGroup ? conversation.title : firstName(conversation.title)}`}
-      />
+      {conversation.canMessage ? (
+        <Composer
+          key={id}
+          draftKey={id}
+          autoFocus
+          onSend={send}
+          onTyping={typingPing}
+          placeholder={`Message ${isGroup ? conversation.title : firstName(conversation.title)}`}
+        />
+      ) : (
+        // A block (either way) ends the conversation; whoever blocked can undo it right here.
+        <motion.div
+          className="chat-column shrink-0 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-1.5 md:pb-4"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={spring.soft}
+        >
+          <div
+            role="status"
+            className="flex min-h-13 items-center justify-center gap-3 rounded-[1.5rem] bg-muted/70 px-4 py-2 text-center text-sm text-muted-foreground"
+          >
+            {conversation.blockedByMe && peer ? (
+              <>
+                <span>You blocked {firstName(peer.displayName)}.</span>
+                <Button variant="secondary" size="sm" onClick={() => void actions.unblock(peer)}>
+                  Unblock
+                </Button>
+              </>
+            ) : (
+              <span>You can’t reply to this conversation.</span>
+            )}
+          </div>
+        </motion.div>
+      )}
 
       {isGroup ? (
         <GroupInfoDialog conversation={conversation} open={infoOpen} onOpenChange={setInfoOpen} />
+      ) : null}
+
+      <AnimatePresence>
+        {drop.dragging && mediaEnabled ? (
+          <DropOverlay
+            key="drop"
+            name={isGroup ? conversation.title : firstName(conversation.title)}
+          />
+        ) : null}
+      </AnimatePresence>
+
+      {viewerIndex >= 0 && viewerEntries[viewerIndex] ? (
+        <Suspense fallback={null}>
+          <MediaViewer
+            entries={viewerEntries}
+            index={viewerIndex}
+            conversationId={id}
+            onIndexChange={stepViewer}
+            onClose={() => setLightbox(null)}
+          />
+        </Suspense>
       ) : null}
     </motion.section>
   );

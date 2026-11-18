@@ -1,7 +1,7 @@
-import { useMutation } from '@apollo/client';
+import { useMutation, useQuery } from '@apollo/client';
 import { ArrowLeft, Check, LogOut, Monitor, Moon, Play, Sun } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { Link, useNavigate } from 'react-router';
 import { toast } from 'sonner';
@@ -10,13 +10,18 @@ import { Button } from '@/components/Button';
 import { Field, Input } from '@/components/Input';
 import { Segmented } from '@/components/Segmented';
 import { Switch } from '@/components/Switch';
+import { useMediaConfig } from '@/features/media/config';
+import { formatBytes } from '@/features/media/format';
+import { usePref, type AutoDownload } from '@/features/media/prefs';
+import * as mediaStore from '@/features/media/store';
 import { cn } from '@/lib/cn';
 import { resetSession } from '@/lib/apollo';
-import { SIGN_OUT, UPDATE_PROFILE } from '@/lib/gql';
+import { BLOCKED_USERS, SIGN_OUT, UPDATE_PROFILE } from '@/lib/gql';
 import { prefersReducedMotion } from '@/lib/media';
 import { exit, spring } from '@/lib/motion';
 import { playSound, useSoundsEnabled, type SoundKind } from '@/lib/sounds';
 import { useThemePreference, type ThemePreference } from '@/lib/theme';
+import { useChatActions } from '../chat/useChatActions';
 import { useViewer } from '../session/ViewerProvider';
 
 const COLORS: Array<{ value: string; name: string }> = [
@@ -36,6 +41,19 @@ const SOUND_PREVIEWS: Array<{ kind: SoundKind; label: string; hint: string }> = 
   { kind: 'newChat', label: 'New chat', hint: 'When someone starts a chat with you' },
   { kind: 'addedToGroup', label: 'Added to a group', hint: 'When someone adds you to a group' },
 ];
+
+const AUTO_DOWNLOAD: Array<{ value: AutoDownload; label: string }> = [
+  { value: 'all', label: 'Photos & videos' },
+  { value: 'photos', label: 'Photos' },
+  { value: 'off', label: 'Off' },
+];
+
+const swap = {
+  initial: { opacity: 0, y: 6 },
+  animate: { opacity: 1, y: 0 },
+  exit: { opacity: 0, y: -6, transition: exit.fast },
+  transition: spring.soft,
+};
 
 const THEMES: Array<{ value: ThemePreference; label: string; icon: typeof Sun }> = [
   { value: 'system', label: 'System', icon: Monitor },
@@ -74,6 +92,21 @@ function Section({
   );
 }
 
+/** What photos and videos this device holds, and a way to clear them. */
+function useMediaUsage() {
+  const [usage, setUsage] = useState<mediaStore.Usage | null>(null);
+  const refresh = useCallback(() => {
+    void mediaStore.usage().then(setUsage, () => undefined);
+  }, []);
+  useEffect(() => {
+    refresh();
+    return mediaStore.onStoreChange(refresh);
+  }, [refresh]);
+  return { usage, refresh };
+}
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
 export function SettingsPage() {
   const viewer = useViewer();
   const navigate = useNavigate();
@@ -85,6 +118,13 @@ export function SettingsPage() {
   const [signOut, out] = useMutation(SIGN_OUT);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const mediaConfig = useMediaConfig();
+  const [autoDownload, setAutoDownload] = usePref('media:autodownload');
+  const [relayOnly, setRelayOnly] = usePref('media:relayOnly');
+  const { usage } = useMediaUsage();
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
+  const hasMedia = (usage?.photos ?? 0) + (usage?.videos ?? 0) > 0;
 
   const dirty =
     (displayName.trim() !== viewer.displayName && displayName.trim() !== '') ||
@@ -290,17 +330,198 @@ export function SettingsPage() {
           </ul>
         </Section>
 
-        <section className="border-t border-border pt-8">
-          <Button
-            variant="danger"
-            loading={out.loading}
-            onClick={() => void logout()}
-            className="w-full"
+        {mediaConfig?.enabled === false ? null : (
+          <Section
+            id="media-heading"
+            title="Photos & videos"
+            description="Sent device to device. Nothing is stored on the server."
           >
-            <LogOut className="size-4" /> Sign out
-          </Button>
+            <div>
+              <Segmented
+                kind="radio"
+                label="Auto-download"
+                value={autoDownload}
+                onChange={setAutoDownload}
+                options={AUTO_DOWNLOAD}
+              />
+              <p className="mt-2 text-xs text-muted-foreground">
+                Downloads start when something scrolls into view. Videos up to 50 MB.
+              </p>
+            </div>
+
+            {mediaConfig?.relay ? (
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <span id="relay-only-label" className="text-sm font-medium">
+                    Hide my IP address
+                  </span>
+                  <p id="relay-only-hint" className="mt-0.5 text-xs text-muted-foreground">
+                    Device-to-device transfers let others in a chat see your IP address. Turn this
+                    on to pass media through the server instead. It’s slower, and the server still
+                    doesn’t keep anything.
+                  </p>
+                </div>
+                <Switch
+                  checked={relayOnly}
+                  onChange={setRelayOnly}
+                  aria-labelledby="relay-only-label"
+                  aria-describedby="relay-only-hint"
+                />
+              </div>
+            ) : null}
+
+            <div className="flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">On this device</p>
+                <p className="mt-0.5 text-xs text-muted-foreground" aria-live="polite">
+                  {usage
+                    ? `${formatBytes(usage.bytes)} · ${plural(usage.photos, 'photo', 'photos')}, ${plural(usage.videos, 'video', 'videos')}`
+                    : '…'}
+                </p>
+              </div>
+              <AnimatePresence initial={false} mode="popLayout">
+                {!confirmClear ? (
+                  <motion.div key="clear" {...swap}>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      disabled={!hasMedia}
+                      onClick={() => setConfirmClear(true)}
+                    >
+                      Clear…
+                    </Button>
+                  </motion.div>
+                ) : null}
+              </AnimatePresence>
+            </div>
+            <AnimatePresence initial={false}>
+              {confirmClear ? (
+                <motion.div key="confirm" className="space-y-2" {...swap}>
+                  <p className="text-sm text-muted-foreground">
+                    Remove all photos and videos from this device? People who haven’t downloaded
+                    them yet won’t be able to get them from you.
+                  </p>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="secondary"
+                      className="flex-1"
+                      onClick={() => setConfirmClear(false)}
+                    >
+                      Keep
+                    </Button>
+                    <Button
+                      variant="danger"
+                      className="flex-1"
+                      onClick={() => {
+                        void mediaStore
+                          .clearAll()
+                          .then(() => toast.success('Removed from this device'));
+                        setConfirmClear(false);
+                      }}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
+          </Section>
+        )}
+
+        <BlockedPeople />
+
+        <section className="border-t border-border pt-8">
+          <AnimatePresence initial={false} mode="popLayout">
+            {confirmSignOut ? (
+              <motion.div key="confirm" className="space-y-3" {...swap}>
+                <p className="text-center text-sm text-muted-foreground">
+                  Sign out? Photos and videos on this device will be removed, and people who haven’t
+                  downloaded them yet won’t be able to get them from you.
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    variant="secondary"
+                    className="flex-1"
+                    onClick={() => setConfirmSignOut(false)}
+                  >
+                    Stay
+                  </Button>
+                  <Button
+                    variant="danger"
+                    className="flex-1"
+                    loading={out.loading}
+                    onClick={() => void logout()}
+                  >
+                    <LogOut className="size-4" /> Sign out
+                  </Button>
+                </div>
+              </motion.div>
+            ) : (
+              <motion.div key="signout" {...swap}>
+                <Button
+                  variant="danger"
+                  loading={out.loading}
+                  // Only ask when signing out would actually remove something.
+                  onClick={() => (hasMedia ? setConfirmSignOut(true) : void logout())}
+                  className="w-full"
+                >
+                  <LogOut className="size-4" /> Sign out
+                </Button>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </section>
       </motion.div>
     </div>
+  );
+}
+
+/** Everyone you blocked, with a way back. */
+function BlockedPeople() {
+  const { data, loading } = useQuery(BLOCKED_USERS, { fetchPolicy: 'cache-and-network' });
+  const actions = useChatActions();
+  const people = data?.blockedUsers ?? [];
+  return (
+    <Section
+      id="blocked-heading"
+      title="Blocked people"
+      description="They can’t message you or add you to groups, and you don’t see each other online."
+    >
+      {people.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          {loading && !data ? '…' : 'Nobody. You can block someone from a chat’s menu.'}
+        </p>
+      ) : (
+        <ul
+          className="divide-y divide-border rounded-xl border border-border"
+          aria-labelledby="blocked-heading"
+        >
+          <AnimatePresence initial={false}>
+            {people.map((u) => (
+              <motion.li
+                key={u.id}
+                layout="position"
+                className="flex items-center gap-3 px-3.5 py-2.5"
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, transition: exit.fast }}
+                transition={spring.soft}
+              >
+                <Avatar name={u.displayName} color={u.avatarColor} size="sm" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium">{u.displayName}</span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    @{u.username}
+                  </span>
+                </span>
+                <Button variant="secondary" size="sm" onClick={() => void actions.unblock(u)}>
+                  Unblock
+                </Button>
+              </motion.li>
+            ))}
+          </AnimatePresence>
+        </ul>
+      )}
+    </Section>
   );
 }

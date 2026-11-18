@@ -37,6 +37,8 @@ To stop, run `docker compose down`. Your data is kept in the `realtime_db` volum
 
 - **Instant delivery.** Messages, typing indicators, unread counts and online status arrive live over WebSockets, with no polling.
 - **Direct messages and group chats.** Find people by username with live search. Create groups, add members later, rename or leave them.
+- **Photos and videos, device to device.** Sent straight between browsers over WebRTC and never stored on the server. They can be downloaded while someone who has them is online. Up to 10 per message, with a caption.
+- **You decide who reaches you.** Block someone and they can't message you, start a chat with you or add you to groups, and neither of you sees the other's online status. Mute any chat, remove a direct chat from your list, and (as a group's owner) remove members.
 - **Pleasant to use.** Messages appear immediately and retry if sending fails. Unread badges, a "new messages" pill, infinite scroll through history, day separators, a reconnecting banner, and `Ctrl/⌘ + K` to start a new chat.
 - **Mobile-first.** A single pane with back navigation on phones and two panes on desktop. Respects safe areas, uses 44 px tap targets, follows your system's light or dark theme, and can be installed as a PWA.
 - **Secure by default.** argon2id password hashing, httpOnly session cookies, rate limiting, input validation, and membership checks on every operation.
@@ -57,6 +59,7 @@ To stop, run `docker compose down`. Your data is kept in the `realtime_db` volum
 | -------------------------------------------------------- | ------------------------------------------------------------ |
 | ![Group chat](docs/screenshots/desktop-group-light.png)  | ![Group chat, dark theme](docs/screenshots/desktop-group-dark.png) |
 | ![Starting a new chat](docs/screenshots/new-chat-light.png) | ![Direct message, dark theme](docs/screenshots/desktop-chat-dark.png) |
+| ![Photos and videos](docs/screenshots/desktop-media-light.png) | ![Photos and videos, dark theme](docs/screenshots/desktop-media-dark.png) |
 | ![Sign up](docs/screenshots/auth-light.png)              | ![Sign up, dark theme](docs/screenshots/auth-dark.png)       |
 
 ## Configuration
@@ -69,10 +72,15 @@ Set these in `.env` next to `docker-compose.yml`.
 | `JWT_SECRET`        | _(random)_ | Signs session cookies. If unset, a random secret is generated at startup, so everyone is signed out whenever the container restarts |
 | `POSTGRES_PASSWORD` | `realtime` | Database password                                                                                 |
 | `COOKIE_SECURE`     | `false`    | Set to `true` when serving over HTTPS so cookies are marked `Secure`                              |
+| `MEDIA_ENABLED`     | `true`     | Turns photos and videos on or off                                                                 |
+| `MEDIA_RELAY`       | `true`     | Lets the server pass media between two devices (in memory, nothing kept) when they can't connect directly |
+| `MEDIA_MAX_IMAGE_MB` | `20`      | Largest photo, after the browser has resized it                                                   |
+| `MEDIA_MAX_VIDEO_MB` | `100`     | Largest video                                                                                     |
+| `ICE_SERVERS`       | public STUN | JSON list of STUN/TURN servers for direct connections, e.g. `[{"urls":"turn:turn.example.com","username":"u","credential":"p"}]`. `[]` means same-network only |
 
 ### Behind a reverse proxy
 
-If you put Realtime behind Caddy, nginx or Traefik, the proxy must forward WebSocket upgrades on `/graphql` and preserve the `Host` header. Serve it over HTTPS and set `COOKIE_SECURE=true`.
+If you put Realtime behind Caddy, nginx or Traefik, the proxy must forward WebSocket upgrades on `/graphql` **and `/media-relay`**, and preserve the `Host` header. Serve it over HTTPS and set `COOKIE_SECURE=true`. HTTPS also makes the relay's frames end-to-end encrypted between the two browsers.
 
 ## Updating
 
@@ -97,11 +105,15 @@ flowchart LR
     S[Fastify + GraphQL Yoga + graphql-ws]
   end
   S --> P[(PostgreSQL)]
+  B <-. "photos and videos: WebRTC, or the in-memory relay" .-> B2[Another browser]
 ```
 
 - **One conversation model.** Direct messages and groups are both conversations with members. Each direct-message pair has a unique key, so two people can never end up with two separate chats.
 - **One event stream per user.** New messages, conversation changes, typing and presence all arrive on a single subscription. Events are published only to current members, so nobody can listen in on a chat they are not part of.
 - **Sessions** are a signed JWT in an `httpOnly`, `SameSite=Lax` cookie. The WebSocket handshake authenticates with the same cookie and rejects cross-origin connections.
+- **Photos and videos never touch the server's disk or database.** The database keeps a small metadata row per file (type, size, dimensions, a hash and a tiny blur placeholder), and a test guards against any column that could hold bytes. The files themselves stay in each person's browser storage.
+- **Direct first.** The two browsers connect over WebRTC data channels; the server only passes the short handshake messages. If that fails (a strict firewall, or someone chose "Hide my IP address"), the server pipes the bytes between the two sockets in memory instead. On HTTPS those frames are encrypted by the browsers, so the server sees only ciphertext.
+- **Pulled from whoever has it.** A device asks which online members of the chat have a file, and the first to answer sends it, so group media stays available after the sender goes offline. With nothing stored on the server, a photo can only be downloaded while someone who has it is online. The app says so ("Waiting for Alice to come online") and fills in by itself when they return. Photos are re-encoded before sending, which removes location data; videos are sent as they are.
 - **Presence** is tracked in memory by counting each user's open sockets. This works for a single instance; running several instances behind a load balancer is not supported.
 
 | Layer  | Stack                                                                                              |

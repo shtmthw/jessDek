@@ -1,5 +1,7 @@
 import type { FastifyInstance } from 'fastify';
+import { Prisma } from '@prisma/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { config } from '../src/config.js';
 import { prisma } from '../src/db.js';
 import { Client, newApp, resetDb, signUp } from './helpers.js';
 
@@ -404,5 +406,313 @@ describe('profile & health', () => {
   it('reports health and readiness', async () => {
     expect((await app.inject('/healthz')).json()).toEqual({ ok: true });
     expect((await app.inject('/readyz')).json()).toEqual({ ok: true });
+  });
+});
+
+const SHA = 'a'.repeat(64);
+const photo = (over: Record<string, unknown> = {}) => ({
+  kind: 'IMAGE',
+  mimeType: 'image/webp',
+  name: 'beach.webp',
+  size: 120_000,
+  width: 1600,
+  height: 900,
+  sha256: SHA,
+  thumbhash: 'YJqGPQw7sFlslqhFafSE+Q6oJ1h2iHB2Rw==',
+  ...over,
+});
+const video = (over: Record<string, unknown> = {}) => ({
+  kind: 'VIDEO',
+  mimeType: 'video/mp4',
+  name: 'clip.mp4',
+  size: 5_000_000,
+  width: 1280,
+  height: 720,
+  durationMs: 42_000,
+  sha256: 'b'.repeat(64),
+  posterSha256: 'c'.repeat(64),
+  posterSize: 20_000,
+  posterMime: 'image/webp',
+  ...over,
+});
+const ATTACHMENT_FIELDS = `id kind mimeType name size width height durationMs sha256 thumbhash posterSha256 posterSize posterMime`;
+const SEND_MEDIA = `mutation($c: ID!, $b: String!, $a: [AttachmentInput!]) { sendMessage(conversationId: $c, body: $b, attachments: $a) { id body attachments { ${ATTACHMENT_FIELDS} } } }`;
+
+describe('media metadata', () => {
+  async function dm() {
+    const { a, b } = await twoUsers();
+    const conv = (await a.gql(START_DIRECT, { u: 'bob' })).data!.startDirect;
+    return { a, b, conv };
+  }
+
+  it('sends a photo with no caption', async () => {
+    const { a, b, conv } = await dm();
+    const res = await a.gql(SEND_MEDIA, { c: conv.id, b: '', a: [photo()] });
+    expect(res.errors).toBeUndefined();
+    const msg = res.data!.sendMessage;
+    expect(msg.body).toBe('');
+    expect(msg.attachments).toHaveLength(1);
+    expect(msg.attachments[0]).toMatchObject({
+      kind: 'IMAGE',
+      mimeType: 'image/webp',
+      name: 'beach.webp',
+      size: 120_000,
+      width: 1600,
+      height: 900,
+      durationMs: null,
+      sha256: SHA,
+      thumbhash: 'YJqGPQw7sFlslqhFafSE+Q6oJ1h2iHB2Rw==',
+      posterSha256: null,
+      posterSize: null,
+      posterMime: null,
+    });
+
+    const page = await b.gql(
+      `query($c: ID!) { messages(conversationId: $c) { messages { id attachments { id sha256 } } } }`,
+      { c: conv.id },
+    );
+    expect(page.data!.messages.messages[0].attachments[0].sha256).toBe(SHA);
+    const list = await b.gql(`{ conversations { lastMessage { attachments { id kind } } } }`);
+    expect(list.data!.conversations[0].lastMessage.attachments).toEqual([
+      { id: msg.attachments[0].id, kind: 'IMAGE' },
+    ]);
+  });
+
+  it('keeps album order and stores video poster metadata', async () => {
+    const { a, conv } = await dm();
+    const res = await a.gql(SEND_MEDIA, {
+      c: conv.id,
+      b: ' look ',
+      a: [video(), photo({ name: 'second.webp' })],
+    });
+    const msg = res.data!.sendMessage;
+    expect(msg.body).toBe('look');
+    expect(msg.attachments.map((x: { kind: string }) => x.kind)).toEqual(['VIDEO', 'IMAGE']);
+    expect(msg.attachments[0]).toMatchObject({
+      durationMs: 42_000,
+      posterSha256: 'c'.repeat(64),
+      posterSize: 20_000,
+      posterMime: 'image/webp',
+    });
+  });
+
+  it('validates attachments', async () => {
+    const { a, conv } = await dm();
+    const cases: Array<[string, unknown[]]> = [
+      ['bad sha', [photo({ sha256: 'xyz' })]],
+      ['svg', [photo({ mimeType: 'image/svg+xml' })]],
+      ['image over the max', [photo({ size: config.media.maxImageBytes + 1 })]],
+      ['video without poster hash', [video({ posterSha256: null })]],
+      ['11 attachments', Array.from({ length: 11 }, () => photo())],
+      ['IMAGE kind with a video mime', [photo({ mimeType: 'video/mp4' })]],
+    ];
+    for (const [label, attachments] of cases) {
+      const res = await a.gql(SEND_MEDIA, { c: conv.id, b: '', a: attachments });
+      expect(res.errors?.[0]?.extensions?.code, label).toBe('BAD_USER_INPUT');
+    }
+    expect(await prisma.attachment.count()).toBe(0);
+
+    const named = await a.gql(SEND_MEDIA, {
+      c: conv.id,
+      b: '',
+      a: [photo({ name: '../../a\u0000b.jpg' })],
+    });
+    expect(named.data!.sendMessage.attachments[0].name).toBe('....ab.jpg');
+
+    const blank = await a.gql(SEND_MEDIA, { c: conv.id, b: '   ', a: [] });
+    expect(blank.errors![0]!.extensions!.code).toBe('BAD_USER_INPUT');
+  });
+
+  it('never stores media bytes', () => {
+    const models = Prisma.dmmf.datamodel.models;
+    for (const model of models) {
+      expect(
+        model.fields.filter((f) => f.type === 'Bytes').map((f) => `${model.name}.${f.name}`),
+      ).toEqual([]);
+    }
+    const attachment = models.find((m) => m.name === 'Attachment')!;
+    expect(attachment.fields.map((f) => f.name).sort()).toEqual(
+      [
+        'durationMs',
+        'height',
+        'id',
+        'kind',
+        'message',
+        'messageId',
+        'mimeType',
+        'name',
+        'position',
+        'posterMime',
+        'posterSha256',
+        'posterSize',
+        'sha256',
+        'size',
+        'thumbhash',
+        'width',
+      ].sort(),
+    );
+  });
+
+  it('exposes mediaConfig to signed-in users only, and can be turned off', async () => {
+    const { a, conv } = await dm();
+    const anon = await new Client(app).gql(`{ mediaConfig { enabled } }`);
+    expect(anon.errors![0]!.extensions!.code).toBe('UNAUTHENTICATED');
+
+    const cfg = (
+      await a.gql(
+        `{ mediaConfig { enabled relay maxAttachments maxImageBytes maxVideoBytes iceServers { urls } } }`,
+      )
+    ).data!.mediaConfig;
+    expect(cfg).toMatchObject({
+      enabled: true,
+      relay: true,
+      maxAttachments: 10,
+      maxImageBytes: 20 * 1024 * 1024,
+      maxVideoBytes: 100 * 1024 * 1024,
+    });
+    expect(cfg.iceServers[0].urls[0]).toMatch(/^stun:/);
+
+    config.media.enabled = false;
+    try {
+      const res = await a.gql(SEND_MEDIA, { c: conv.id, b: '', a: [photo()] });
+      expect(res.errors![0]!.extensions!.code).toBe('FORBIDDEN');
+    } finally {
+      config.media.enabled = true;
+    }
+  });
+});
+
+describe('blocking, muting and removing', () => {
+  const VIEW = `{ conversations { id type title muted hidden blockedByMe canMessage peer { username online lastSeenAt } } }`;
+  const code = (r: { errors?: Array<{ extensions?: { code?: string } }> }) =>
+    r.errors?.[0]?.extensions?.code;
+  const SEND_TEXT = `mutation($c: ID!, $b: String!) { sendMessage(conversationId: $c, body: $b) { id } }`;
+
+  async function three() {
+    const { a, b } = await twoUsers();
+    const c = new Client(app);
+    await signUp(c, 'carol', { displayName: 'Carol C' });
+    const dm = (await a.gql(START_DIRECT, { u: 'bob' })).data!.startDirect;
+    const ids = Object.fromEntries(
+      (await prisma.user.findMany()).map((u) => [u.username, u.id]),
+    ) as Record<string, string>;
+    return { a, b, c, dm, ids };
+  }
+
+  it('a block stops the direct chat both ways, hides presence, and can be undone', async () => {
+    const { a, b, dm, ids } = await three();
+    const blocked = await a.gql(`mutation($u: ID!) { blockUser(userId: $u) { username } }`, {
+      u: ids.bob,
+    });
+    expect(blocked.data!.blockUser.username).toBe('bob');
+
+    expect(code(await b.gql(SEND_TEXT, { c: dm.id, b: 'hello?' }))).toBe('FORBIDDEN');
+    expect(code(await a.gql(SEND_TEXT, { c: dm.id, b: 'hi' }))).toBe('FORBIDDEN');
+
+    const mine = (await a.gql(VIEW)).data!.conversations[0];
+    expect(mine).toMatchObject({ blockedByMe: true, canMessage: false });
+    const theirs = (await b.gql(VIEW)).data!.conversations[0];
+    expect(theirs).toMatchObject({ blockedByMe: false, canMessage: false });
+    // Neither sees when the other was around.
+    expect(theirs.peer).toMatchObject({ online: false, lastSeenAt: null });
+    expect(mine.peer.lastSeenAt).toBeNull();
+
+    expect((await a.gql(`{ blockedUsers { username } }`)).data!.blockedUsers).toEqual([
+      { username: 'bob' },
+    ]);
+    expect((await b.gql(`{ blockedUsers { username } }`)).data!.blockedUsers).toEqual([]);
+
+    await a.gql(`mutation($u: ID!) { unblockUser(userId: $u) }`, { u: ids.bob });
+    expect(code(await b.gql(SEND_TEXT, { c: dm.id, b: 'back again' }))).toBeUndefined();
+    expect((await b.gql(VIEW)).data!.conversations[0].peer.lastSeenAt).toEqual(expect.any(String));
+  });
+
+  it('someone who blocked you can’t be reached by a new chat or a group, but shared groups still work', async () => {
+    const { a, b, c, ids } = await three();
+    const group = (
+      await a.gql(`mutation { createGroup(name: "Trip", usernames: ["bob", "carol"]) { id } }`)
+    ).data!.createGroup;
+    await c.gql(`mutation($u: ID!) { blockUser(userId: $u) { id } }`, { u: ids.alice });
+
+    expect(code(await a.gql(START_DIRECT, { u: 'carol' }))).toBe('FORBIDDEN');
+    expect(
+      code(await a.gql(`mutation { createGroup(name: "Again", usernames: ["carol"]) { id } }`)),
+    ).toBe('FORBIDDEN');
+    const other = (
+      await a.gql(`mutation { createGroup(name: "Other", usernames: ["bob"]) { id } }`)
+    ).data!.createGroup;
+    expect(
+      code(
+        await a.gql(
+          `mutation($c: ID!) { addMembers(conversationId: $c, usernames: ["carol"]) { id } }`,
+          { c: other.id },
+        ),
+      ),
+    ).toBe('FORBIDDEN');
+    // Carol can still start one with Alice (she can unblock whenever she likes), and the group goes on.
+    expect(code(await a.gql(SEND_TEXT, { c: group.id, b: 'still here' }))).toBeUndefined();
+    expect(code(await c.gql(SEND_TEXT, { c: group.id, b: 'me too' }))).toBeUndefined();
+    expect(code(await b.gql(SEND_TEXT, { c: group.id, b: 'hi all' }))).toBeUndefined();
+  });
+
+  it('mutes and unmutes a chat for you only', async () => {
+    const { a, b, dm } = await three();
+    const MUTE = `mutation($c: ID!, $m: Boolean!) { muteConversation(conversationId: $c, muted: $m) { muted } }`;
+    expect((await a.gql(MUTE, { c: dm.id, m: true })).data!.muteConversation.muted).toBe(true);
+    expect((await a.gql(VIEW)).data!.conversations[0].muted).toBe(true);
+    expect((await b.gql(VIEW)).data!.conversations[0].muted).toBe(false);
+    expect((await a.gql(MUTE, { c: dm.id, m: false })).data!.muteConversation.muted).toBe(false);
+  });
+
+  it('removes a direct chat from your list until something new happens in it', async () => {
+    const { a, b, dm } = await three();
+    await a.gql(SEND_TEXT, { c: dm.id, b: 'first' });
+    await a.gql(`mutation($c: ID!) { hideConversation(conversationId: $c) }`, { c: dm.id });
+    expect((await a.gql(VIEW)).data!.conversations).toEqual([]);
+    expect((await b.gql(VIEW)).data!.conversations).toHaveLength(1); // only gone for you
+
+    await b.gql(SEND_TEXT, { c: dm.id, b: 'are you there?' });
+    const back = (await a.gql(VIEW)).data!.conversations;
+    expect(back).toHaveLength(1);
+    expect(back[0]).toMatchObject({ id: dm.id, hidden: false });
+
+    // Starting it again brings it back too; groups are left, not removed.
+    await a.gql(`mutation($c: ID!) { hideConversation(conversationId: $c) }`, { c: dm.id });
+    expect((await a.gql(START_DIRECT, { u: 'bob' })).data!.startDirect.id).toBe(dm.id);
+    expect((await a.gql(VIEW)).data!.conversations).toHaveLength(1);
+    const group = (await a.gql(`mutation { createGroup(name: "G", usernames: ["bob"]) { id } }`))
+      .data!.createGroup;
+    expect(
+      code(
+        await a.gql(`mutation($c: ID!) { hideConversation(conversationId: $c) }`, { c: group.id }),
+      ),
+    ).toBe('BAD_USER_INPUT');
+  });
+
+  it('lets only the owner remove someone from a group', async () => {
+    const { a, b, c, ids } = await three();
+    const group = (
+      await a.gql(`mutation { createGroup(name: "Trip", usernames: ["bob", "carol"]) { id } }`)
+    ).data!.createGroup;
+    await c.gql(SEND_TEXT, { c: group.id, b: 'hello' });
+    expect((await b.gql(`{ conversations { ownerId } }`)).data!.conversations[0].ownerId).toBe(
+      ids.alice,
+    );
+    const REMOVE = `mutation($c: ID!, $u: ID!) { removeMember(conversationId: $c, userId: $u) { members { username } } }`;
+
+    expect(code(await b.gql(REMOVE, { c: group.id, u: ids.carol }))).toBe('FORBIDDEN');
+    expect(code(await a.gql(REMOVE, { c: group.id, u: ids.alice }))).toBe('BAD_USER_INPUT');
+    const res = await a.gql(REMOVE, { c: group.id, u: ids.carol });
+    expect(
+      res.data!.removeMember.members.map((m: { username: string }) => m.username).sort(),
+    ).toEqual(['alice', 'bob']);
+    expect(
+      (await c.gql(VIEW)).data!.conversations.some((x: { id: string }) => x.id === group.id),
+    ).toBe(false);
+    expect(code(await c.gql(SEND_TEXT, { c: group.id, b: 'let me in' }))).toBe('NOT_FOUND');
+    // What they said before stays.
+    const history = await a.gql(MESSAGES, { c: group.id });
+    expect(history.data!.messages.messages.map((m: { body: string }) => m.body)).toContain('hello');
+    expect(code(await a.gql(REMOVE, { c: group.id, u: ids.carol }))).toBe('NOT_FOUND');
   });
 });

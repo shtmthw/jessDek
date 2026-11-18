@@ -1,5 +1,6 @@
 import { prisma } from '../db.js';
 import { publishToUsers } from '../pubsub.js';
+import { withoutBlocked } from './blocks.js';
 
 // Online state is tracked per process by counting open subscription sockets per user.
 // (A multi-instance deployment would need a shared store such as Redis.)
@@ -17,7 +18,8 @@ async function peersOf(userId: string): Promise<string[]> {
 }
 
 async function broadcast(userId: string, online: boolean, lastSeenAt: Date) {
-  const peers = await peersOf(userId);
+  // People in a block relation with this user never learn when they come and go.
+  const peers = await withoutBlocked(userId, await peersOf(userId));
   publishToUsers(peers, { __typename: 'PresenceChanged', userId, online, lastSeenAt });
 }
 
@@ -37,4 +39,19 @@ export async function userDisconnected(userId: string): Promise<void> {
   const lastSeenAt = new Date();
   await prisma.user.update({ where: { id: userId }, data: { lastSeenAt } }).catch(() => undefined);
   await broadcast(userId, false, lastSeenAt);
+}
+
+/** Tells `viewers` where `userId` stands now: hidden (blocked) or their real state. */
+export async function announcePresence(userId: string, viewers: string[], hidden: boolean) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { lastSeenAt: true },
+  });
+  if (!user) return;
+  publishToUsers(viewers, {
+    __typename: 'PresenceChanged',
+    userId,
+    online: hidden ? false : isOnline(userId),
+    lastSeenAt: hidden ? null : user.lastSeenAt,
+  });
 }

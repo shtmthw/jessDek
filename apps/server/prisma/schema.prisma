@@ -12,6 +12,11 @@ enum ConversationType {
   GROUP
 }
 
+enum AttachmentKind {
+  IMAGE
+  VIDEO
+}
+
 enum MemberRole {
   OWNER
   MEMBER
@@ -30,6 +35,22 @@ model User {
   memberships   ConversationMember[]
   sentMessages  Message[]
   createdChats  Conversation[]       @relation("ConversationCreator")
+  blocking      Block[]              @relation("Blocker")
+  blockedBy     Block[]              @relation("Blocked")
+}
+
+/// `blocker` blocked `blocked`: no DMs or group invites from them, and no presence or typing
+/// between the two. Their messages in groups both belong to still show.
+model Block {
+  blockerId String
+  blockedId String
+  createdAt DateTime @default(now())
+
+  blocker User @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked User @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@id([blockerId, blockedId])
+  @@index([blockedId])
 }
 
 model Conversation {
@@ -55,6 +76,10 @@ model ConversationMember {
   role           MemberRole @default(MEMBER)
   joinedAt       DateTime   @default(now())
   lastReadAt     DateTime   @default(now())
+  /// Muted: no sounds, not counted in the tab title (still counted in the chat's badge).
+  mutedAt        DateTime?
+  /// A direct chat removed from your list. Cleared when a new message arrives or you start it again.
+  hiddenAt       DateTime?
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -72,6 +97,31 @@ model Message {
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender       User         @relation(fields: [senderId], references: [id])
+  attachments  Attachment[]
 
   @@index([conversationId, createdAt, id])
+}
+
+/// Metadata only. The bytes live on people's devices and travel device to device.
+/// Never add a Bytes column here (api.test.ts guards this).
+model Attachment {
+  id           String         @id @default(cuid())
+  messageId    String
+  position     Int
+  kind         AttachmentKind
+  mimeType     String
+  name         String
+  size         Int
+  width        Int
+  height       Int
+  durationMs   Int?
+  sha256       String
+  thumbhash    String?
+  posterSha256 String?
+  posterSize   Int?
+  posterMime   String?
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, position])
 }

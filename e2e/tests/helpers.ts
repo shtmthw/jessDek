@@ -38,3 +38,33 @@ export async function send(page: Page, text: string) {
   await box.fill(text);
   await box.press('Enter');
 }
+
+/** Picks files through the composer's (hidden) file input, like the attach button would. */
+export async function attach(page: Page, ...paths: string[]) {
+  await page.locator('input[data-media-input]').setInputFiles(paths);
+}
+
+/** Largest request body sent to /graphql by this page so far (HTTP only; the WebSocket is separate). */
+export function watchGraphqlBodies(page: Page) {
+  const sizes: number[] = [];
+  page.on('request', (req) => {
+    if (req.url().endsWith('/graphql') && req.method() === 'POST')
+      sizes.push(req.postDataBuffer()?.length ?? 0);
+  });
+  return { max: () => Math.max(0, ...sizes), count: () => sizes.length };
+}
+
+/** Creates a group from the new-chat dialog; the others are added live. */
+export async function createGroup(page: Page, name: string, members: string[]) {
+  await page.getByRole('button', { name: 'New chat' }).first().click();
+  await page.getByRole('tab', { name: 'Group' }).click();
+  await page.getByLabel('Group name').fill(name);
+  for (const username of members) {
+    await page.getByLabel('Search people by username').fill(username.slice(0, 6));
+    await page.getByRole('button', { name: new RegExp(`@${username}`) }).click();
+  }
+  await page
+    .getByRole('button', { name: new RegExp(`Create group with ${members.length} people?`) })
+    .click();
+  await expect(page.getByRole('heading', { name })).toBeVisible();
+}

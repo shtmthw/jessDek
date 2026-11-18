@@ -19,6 +19,10 @@ export default defineConfig({
   workers: 1,
   timeout: 180_000,
   reporter: 'list',
-  use: { baseURL: `http://localhost:${PORT}`, ...devices['Desktop Chrome'] },
+  use: {
+    baseURL: `http://localhost:${PORT}`,
+    ...devices['Desktop Chrome'],
+    launchOptions: { args: ['--disable-features=WebRtcHideLocalIpsWithMdns'] },
+  },
   webServer: webServer(PORT, DATABASE_URL),
 });

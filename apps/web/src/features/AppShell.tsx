@@ -12,7 +12,15 @@ import {
   type MotionValue,
   type PanInfo,
 } from 'motion/react';
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  Suspense,
+  lazy,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import {
   NavLink,
   Navigate,
@@ -28,6 +36,7 @@ import { Button } from '@/components/Button';
 import { Kbd } from '@/components/Kbd';
 import { Logo } from '@/components/Logo';
 import { cn } from '@/lib/cn';
+import { hasTray } from '@/features/media/trayStore';
 import { CONVERSATIONS } from '@/lib/gql';
 import {
   COMPOSER_ID,
@@ -48,6 +57,9 @@ import { useViewer } from './session/ViewerProvider';
 import { SettingsPage } from './settings/SettingsPage';
 
 const SWIPE_EDGE_PX = 28;
+
+// A visual-QA page for every photo and video state. Dev builds only; production drops it.
+const DevMedia = import.meta.env.DEV ? lazy(() => import('./chat/media/DevGallery')) : null;
 
 function EmptyState({ onNewChat }: { onNewChat: () => void }) {
   const shortcuts: Array<[ReactNode, string]> = [
@@ -102,6 +114,16 @@ function PaneRoutes({ location, onNewChat }: { location?: Location; onNewChat: (
       <Route path="/" element={<EmptyState onNewChat={onNewChat} />} />
       <Route path="/c/:id" element={<ChatView />} />
       <Route path="/settings" element={<SettingsPage />} />
+      {DevMedia ? (
+        <Route
+          path="/dev/media"
+          element={
+            <Suspense fallback={null}>
+              <DevMedia />
+            </Suspense>
+          }
+        />
+      ) : null}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
@@ -152,6 +174,9 @@ function MobilePane({
       dragMomentum={false}
       onDragEnd={onDragEnd}
       onPointerDownCapture={(e) => {
+        // React pointer events bubble through portals: a swipe starting in a dialog (or the media
+        // viewer) near the left edge must not drag the chat pane underneath.
+        if (!e.currentTarget.contains(e.target as Node)) return;
         const target = e.target as HTMLElement;
         if (e.clientX > SWIPE_EDGE_PX || target.closest('a,button') || isEditable(target)) return;
         e.preventDefault(); // a drag from the edge should never start a text selection
@@ -171,7 +196,11 @@ export function AppShell() {
   const width = useWindowWidth();
   const [newChatOpen, setNewChatOpen] = useState(false);
   const chatMatch = matchPath('/c/:id', location.pathname);
-  const inPane = Boolean(chatMatch || matchPath('/settings', location.pathname));
+  const inPane = Boolean(
+    chatMatch ||
+    matchPath('/settings', location.pathname) ||
+    (import.meta.env.DEV && matchPath('/dev/media', location.pathname)),
+  );
   const openNewChat = () => setNewChatOpen(true);
 
   // Phone layout: one motion value drives the pane and the list's parallax underneath it.
@@ -239,6 +268,8 @@ export function AppShell() {
       if (e.key === 'Escape' && chatId) {
         // Esc leaves the chat, unless it would throw away text you're writing.
         if (typing && (e.target as HTMLTextAreaElement).value) return;
+        // …or photos and videos you've added but not sent yet.
+        if (hasTray(chatId)) return;
         e.preventDefault();
         navigate('/');
         requestAnimationFrame(() =>
@@ -256,7 +287,8 @@ export function AppShell() {
   }, []);
 
   // Show the total unread count in the tab title.
-  const unread = conversations?.reduce((sum, c) => sum + c.unreadCount, 0) ?? 0;
+  // Muted chats keep their own badge but don't count towards the tab title.
+  const unread = conversations?.reduce((sum, c) => sum + (c.muted ? 0 : c.unreadCount), 0) ?? 0;
   useEffect(() => {
     document.title = unread > 0 ? `(${unread}) Realtime` : 'Realtime';
     return () => {

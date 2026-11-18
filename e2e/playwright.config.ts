@@ -15,6 +15,9 @@ export default defineConfig({
     baseURL: `http://localhost:${PORT}`,
     trace: 'retain-on-failure',
     ...devices['Desktop Chrome'],
+    // Real IPs instead of mDNS names in ICE candidates, so device-to-device transfers connect in
+    // headless CI instead of silently falling back to the relay.
+    launchOptions: { args: ['--disable-features=WebRtcHideLocalIpsWithMdns'] },
   },
   webServer: webServer(PORT, e2eDatabaseUrl),
 });

@@ -1,5 +1,5 @@
 import { useQuery } from '@apollo/client';
-import { MessageSquarePlus, Search, X } from 'lucide-react';
+import { BellOff, Image as ImageIcon, MessageSquarePlus, Search, Video, X } from 'lucide-react';
 import {
   AnimatePresence,
   LayoutGroup,
@@ -15,15 +15,40 @@ import { buttonClass } from '@/components/Button';
 import { Kbd } from '@/components/Kbd';
 import { Skeleton } from '@/components/Skeleton';
 import { cn } from '@/lib/cn';
+import { useTray } from '@/features/media/trayStore';
 import { useDraft } from '@/lib/drafts';
 import { CONVERSATIONS, type Conversation } from '@/lib/gql';
 import { SEARCH_ID } from '@/lib/keys';
+import { mediaSummary, type MediaKinds } from '@/lib/mediaText';
 import { exit, spring } from '@/lib/motion';
 import { formatListTime } from '@/lib/time';
 import { useTypingNames } from '../realtime/typing';
 import { useViewer } from '../session/ViewerProvider';
 
-function preview(c: Conversation, viewerId: string): string {
+/** "Photo", "3 photos", "Video"… with a small icon, then the caption if there is one. */
+function MediaPreview({
+  attachments,
+  caption,
+}: {
+  attachments: readonly MediaKinds[];
+  caption: string;
+}) {
+  const summary = mediaSummary(attachments);
+  const text = caption.replace(/\s+/g, ' ').trim();
+  if (!summary) return <>{text}</>;
+  const Icon = summary.icon === 'video' ? Video : ImageIcon;
+  return (
+    <>
+      <span className="inline-flex items-center gap-1 align-bottom">
+        <Icon className="size-3.5 shrink-0" aria-hidden />
+        {summary.text}
+      </span>
+      {text ? ` · ${text}` : ''}
+    </>
+  );
+}
+
+function preview(c: Conversation, viewerId: string): React.ReactNode {
   const m = c.lastMessage;
   if (!m) return c.type === 'GROUP' ? 'Group created' : 'Say hello 👋';
   const who =
@@ -32,7 +57,16 @@ function preview(c: Conversation, viewerId: string): string {
       : c.type === 'GROUP'
         ? `${m.sender.displayName.split(' ')[0]}: `
         : '';
-  return who + m.body.replace(/\s+/g, ' ');
+  return (
+    <>
+      {who}
+      {m.attachments?.length ? (
+        <MediaPreview attachments={m.attachments} caption={m.body} />
+      ) : (
+        m.body.replace(/\s+/g, ' ')
+      )}
+    </>
+  );
 }
 
 /** Sorts newest activity first; shared with the keyboard shortcuts that step through chats. */
@@ -43,6 +77,7 @@ function Preview({ c, active }: { c: Conversation; active: boolean }) {
   const viewer = useViewer();
   const typing = useTypingNames(c.id);
   const draft = useDraft(c.id).trim();
+  const tray = useTray(c.id);
   const unread = c.unreadCount > 0;
 
   let key = 'last';
@@ -54,12 +89,12 @@ function Preview({ c, active }: { c: Conversation; active: boolean }) {
         {c.type === 'GROUP' ? `${typing[0]!.split(' ')[0]} typing…` : 'typing…'}
       </span>
     );
-  } else if (draft && !active) {
+  } else if ((draft || tray.length > 0) && !active) {
     key = 'draft';
     content = (
       <>
         <span className="font-medium text-danger">Draft: </span>
-        {draft.replace(/\s+/g, ' ')}
+        <MediaPreview attachments={tray} caption={draft} />
       </>
     );
   }
@@ -116,18 +151,23 @@ export function ConversationRow({ conversation: c }: { conversation: Conversatio
       />
       <div className="relative min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
-          <span
-            className={cn(
-              'truncate text-[15px] tracking-tight',
-              unread ? 'font-semibold' : 'font-medium',
-            )}
-          >
-            {c.title}
+          <span className="flex min-w-0 items-center gap-1">
+            <span
+              className={cn(
+                'truncate text-[15px] tracking-tight',
+                unread ? 'font-semibold' : 'font-medium',
+              )}
+            >
+              {c.title}
+            </span>
+            {c.muted ? (
+              <BellOff className="size-3.5 shrink-0 text-muted-foreground" aria-label="Muted" />
+            ) : null}
           </span>
           <span
             className={cn(
               'tabular shrink-0 text-xs transition-colors',
-              unread ? 'font-semibold text-brand-text' : 'text-muted-foreground',
+              unread && !c.muted ? 'font-semibold text-brand-text' : 'text-muted-foreground',
             )}
           >
             {formatListTime(c.lastMessage?.createdAt ?? c.lastMessageAt)}
@@ -140,7 +180,13 @@ export function ConversationRow({ conversation: c }: { conversation: Conversatio
               <motion.span
                 key="badge"
                 aria-label={`${c.unreadCount} unread`}
-                className="tabular inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-brand px-1.5 text-[11px] font-semibold text-brand-foreground"
+                className={cn(
+                  'tabular inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold transition-colors',
+                  // A muted chat still counts, quietly.
+                  c.muted
+                    ? 'bg-muted-foreground/25 text-foreground'
+                    : 'bg-brand text-brand-foreground',
+                )}
                 initial={{ scale: 0, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 exit={{ scale: 0, opacity: 0, transition: exit.fast }}

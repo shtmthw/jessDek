@@ -14,24 +14,16 @@ import { SESSION_COOKIE, SESSION_MAX_AGE_S, sessionFromCookieHeader } from './au
 import { config } from './config.js';
 import type { Context, SessionChange } from './context.js';
 import { prisma } from './db.js';
+import { deny, sameOrigin } from './origin.js';
+import { closeAllRelays, closeRelaysOf, handleRelayUpgrade, setRelayLogger } from './relay.js';
 import { schema } from './schema.js';
+import { getPeer, PEER_ID, registerPeer, unregisterPeer } from './services/peers.js';
 import { userConnected, userDisconnected } from './services/presence.js';
 
 interface ServerContext {
   req: FastifyRequest;
   reply: FastifyReply;
   session: SessionChange;
-}
-
-/** The browser sends Origin on WebSocket upgrades; it must match the host being served. */
-function sameOrigin(req: IncomingMessage): boolean {
-  const origin = req.headers.origin;
-  if (!origin) return true; // non-browser clients
-  try {
-    return new URL(origin).host === req.headers.host;
-  } catch {
-    return false;
-  }
 }
 
 export async function buildApp() {
@@ -49,7 +41,9 @@ export async function buildApp() {
             defaultSrc: ["'self'"],
             scriptSrc: ["'self'"],
             styleSrc: ["'self'", "'unsafe-inline'"],
-            imgSrc: ["'self'", 'data:'],
+            // blob: for photos and videos, which live on the device and are shown from object URLs.
+            imgSrc: ["'self'", 'data:', 'blob:'],
+            mediaSrc: ["'self'", 'blob:'],
             fontSrc: ["'self'", 'data:'],
             connectSrc: ["'self'", 'ws:', 'wss:'],
             objectSrc: ["'none'"],
@@ -91,6 +85,7 @@ export async function buildApp() {
       userId: await sessionFromCookieHeader(req.headers.cookie),
       ip: req.ip,
       session,
+      peerId: null,
     }),
   });
 
@@ -121,15 +116,17 @@ export async function buildApp() {
   // ---- GraphQL subscriptions over WebSocket (same path) ----
   const wsServer = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
   const socketUsers = new WeakMap<WebSocket, string>();
+  const socketPeers = new WeakMap<WebSocket, string>();
 
   app.server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     const path = (req.url ?? '').split('?')[0];
-    if (path !== '/graphql') return; // leave other upgrades (e.g. dev tooling) alone
-    if (!sameOrigin(req)) {
-      socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
-      socket.destroy();
+    if (path === '/media-relay') {
+      if (!config.media.enabled || !config.media.relay) return deny(socket);
+      void handleRelayUpgrade(req, socket, head).catch(() => deny(socket));
       return;
     }
+    if (path !== '/graphql') return; // leave other upgrades (e.g. dev tooling) alone
+    if (!sameOrigin(req)) return deny(socket);
     wsServer.handleUpgrade(req, socket, head, (ws) => wsServer.emit('connection', ws, req));
   });
 
@@ -139,11 +136,23 @@ export async function buildApp() {
       onConnect: async (ctx) => {
         const userId = await sessionFromCookieHeader(ctx.extra.request.headers.cookie);
         if (!userId) return false; // closes with 4403; the client treats it as fatal
+        const raw = (ctx.connectionParams as { peerId?: unknown } | undefined)?.peerId;
+        const peerId = typeof raw === 'string' && PEER_ID.test(raw) ? raw : null;
+        // A peer id already owned by someone else is refused, so ids can't be hijacked.
+        if (peerId && !registerPeer(peerId, userId, ctx.extra.socket)) return false;
+        if (peerId) socketPeers.set(ctx.extra.socket, peerId);
         socketUsers.set(ctx.extra.socket, userId);
         await userConnected(userId);
         return true;
       },
       onClose: async (ctx) => {
+        const peerId = socketPeers.get(ctx.extra.socket);
+        if (peerId) {
+          socketPeers.delete(ctx.extra.socket);
+          // Only if this socket still owns the peer id (a reconnect may have replaced it).
+          if (getPeer(peerId)?.socket === ctx.extra.socket) closeRelaysOf(peerId);
+          unregisterPeer(peerId, ctx.extra.socket);
+        }
         const userId = socketUsers.get(ctx.extra.socket);
         if (!userId) return;
         socketUsers.delete(ctx.extra.socket);
@@ -153,13 +162,17 @@ export async function buildApp() {
         userId: socketUsers.get(ctx.extra.socket) ?? null,
         ip: ctx.extra.request.socket.remoteAddress ?? '',
         session: {},
+        peerId: socketPeers.get(ctx.extra.socket) ?? null,
       }),
     },
     wsServer,
     30_000, // ping every 30s so dead connections are detected and presence stays accurate
   );
 
+  setRelayLogger(app.log);
+
   app.addHook('onClose', async () => {
+    closeAllRelays();
     await disposeWs.dispose();
     for (const client of wsServer.clients) client.terminate();
     wsServer.close();

@@ -12,8 +12,10 @@ import { GraphQLWsLink } from '@apollo/client/link/subscriptions';
 import { getMainDefinition } from '@apollo/client/utilities';
 import { createClient } from 'graphql-ws';
 import { setConnectionState } from './connection';
+import { getPeerId } from '@/features/media/peerId';
 import { clearDrafts } from './drafts';
 import { ME } from './gql';
+import { runSignOutHooks } from './sessionHooks';
 
 interface PageRef {
   hasMore: boolean;
@@ -96,6 +98,8 @@ function retryWait(retries: number) {
 export const wsClient = createClient({
   url: `${wsProtocol}://${location.host}/graphql`,
   lazy: true, // connect only once someone subscribes, i.e. after signing in
+  // Identifies this tab for device-to-device photo and video transfers.
+  connectionParams: () => ({ peerId: getPeerId() }),
   retryAttempts: Infinity,
   retryWait,
   // While the server is unreachable the browser reports an *error* before the close, and the
@@ -135,6 +139,7 @@ export async function resetSession() {
   try {
     client.writeQuery({ query: ME, data: { me: null } });
     await new Promise((resolve) => setTimeout(resolve, 0)); // let the signed-in screens unmount
+    await runSignOutHooks(); // e.g. photos and videos saved on this device
     await client.resetStore();
   } catch {
     /* the Me query will report the problem */

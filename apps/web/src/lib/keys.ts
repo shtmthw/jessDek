@@ -17,7 +17,8 @@ export const isMac = () =>
 export const modKey = () => (isMac() ? '⌘' : 'Ctrl');
 export const altKey = () => (isMac() ? '⌥' : 'Alt');
 
-export const isDialogOpen = () => document.querySelector('[role="dialog"]') !== null;
+/** A dialog or a menu is open: Esc and the global shortcuts belong to it. */
+export const isDialogOpen = () => document.querySelector('[role="dialog"], [role="menu"]') !== null;
 
 export const COMPOSER_ID = 'composer';
 export const SEARCH_ID = 'chat-search';

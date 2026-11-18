@@ -1,7 +1,9 @@
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Browser, type Page } from '@playwright/test';
+import { attach } from '../tests/helpers';
 
 const OUT = fileURLToPath(new URL('../../docs/screenshots/', import.meta.url));
+const fixture = (name: string) => fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url));
 const DESKTOP = { width: 1280, height: 800 };
 const PHONE = { width: 390, height: 844 };
 
@@ -99,6 +101,29 @@ test('capture README screenshots', async ({ browser }) => {
     }
     await desk.context.close();
   }
+
+  // Pass 3: photos and videos. The seed can't hold any (the server never stores media), so Alice
+  // adds some live, last, so the earlier pictures are unaffected.
+  const sendMedia = async (page: Page, caption: string) => {
+    await chat(page, /Bob Carter/).click();
+    await expect(page.getByText('Absolutely, send me the link')).toBeVisible();
+    await attach(page, fixture('photo-gps.jpg'), fixture('clip.webm'), fixture('photo-gps.jpg'));
+    const box = page.getByLabel('Message', { exact: true });
+    await box.fill(caption);
+    await box.press('Enter');
+    await expect(page.getByRole('log', { name: 'Messages' }).getByText('Sent')).toBeVisible();
+    await settle(page, 900);
+  };
+  for (const scheme of ['light', 'dark'] as const) {
+    const desk = await signIn(browser, 'alice', scheme);
+    await sendMedia(desk.page, 'Photos from the trail');
+    await desk.page.screenshot({ path: `${OUT}desktop-media-${scheme}.png` });
+    await desk.context.close();
+  }
+  const phone = await signIn(browser, 'alice', 'light', PHONE, 3);
+  await sendMedia(phone.page, 'More from the trail');
+  await phone.page.screenshot({ path: `${OUT}mobile-media-light.png` });
+  await phone.context.close();
 
   await bob.context.close();
   await carol.context.close();
