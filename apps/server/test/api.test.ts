@@ -130,6 +130,17 @@ describe('auth', () => {
     forged.cookie = 'rt_session=not.a.jwt';
     expect((await forged.gql(`{ me { id } }`)).data!.me).toBeNull();
   });
+
+  it('treats a valid session whose user no longer exists as signed out', async () => {
+    const c = new Client(app);
+    const user = await signUp(c, 'ghost');
+    await prisma.user.delete({ where: { id: user.id } }); // e.g. the database was reset
+    expect((await c.gql(`{ me { id } }`)).data!.me).toBeNull();
+    const res = await c.gql(
+      `mutation { updateProfile(input: { displayName: "Boo", avatarColor: "#6366f1" }) { id } }`,
+    );
+    expect(res.errors![0]!.extensions!.code).toBe('UNAUTHENTICATED');
+  });
 });
 
 describe('direct messages', () => {
