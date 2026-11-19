@@ -125,6 +125,86 @@ test('capture README screenshots', async ({ browser }) => {
   await phone.page.screenshot({ path: `${OUT}mobile-media-light.png` });
   await phone.context.close();
 
+  // Pass 4: the avatar studio, dressing Alice up (not saved, so nothing above changes).
+  const dressUp = async (page: Page) => {
+    await page.getByRole('link', { name: /@alice/ }).click();
+    await page.getByRole('link', { name: 'Edit avatar' }).click();
+    await expect(page.getByRole('heading', { name: 'Avatar' })).toBeVisible();
+    const pick = async (tab: string, option: string) => {
+      await page.getByRole('tab', { name: tab }).click();
+      await page.getByRole('radio', { name: option, exact: true }).click();
+    };
+    await pick('Hair', 'Pigtails');
+    await pick('Hair', 'Ginger');
+    await pick('Skin', 'Sand');
+    await pick('Details', 'Blush & freckles');
+    await pick('Pets', 'Bunny');
+    await pick('Hats', 'Flower crown');
+    await pick('Hats', 'Rose');
+    await settle(page);
+  };
+  for (const [scheme, viewport, scale, name] of [
+    ['light', DESKTOP, 2, 'avatar-studio-light'],
+    ['dark', PHONE, 3, 'avatar-studio-phone-dark'],
+  ] as const) {
+    const s = await signIn(browser, 'alice', scheme, viewport, scale);
+    await dressUp(s.page);
+    await s.page.screenshot({ path: `${OUT}${name}.png` });
+    await s.context.close();
+  }
+
+  // Avatar specials: the nine ready-made characters, one picked.
+  {
+    const s = await signIn(browser, 'alice', 'light', DESKTOP, 2);
+    await s.page.goto('/settings/avatar');
+    await s.page.getByRole('tab', { name: 'Specials' }).click();
+    await s.page.getByRole('radio', { name: 'Headphones' }).click();
+    await settle(s.page);
+    await s.page.screenshot({ path: `${OUT}avatar-specials-light.png` });
+    await s.context.close();
+  }
+
+  // Cards: the studio (alice designs hers) and Bob's shared card seen by a visitor.
+  const designCard = async (page: Page) => {
+    await page.goto('/settings/card');
+    await expect(page.getByRole('heading', { name: 'Card' })).toBeVisible();
+    await page.getByRole('textbox', { name: 'About me' }).fill('Coffee first, then chat.\nSay hi!');
+    for (const n of ['Photography', 'Coffee', 'Board games']) {
+      await page.getByRole('button', { name: n, exact: true }).click();
+    }
+    await page.getByRole('tab', { name: 'Colors' }).click();
+    await page.getByRole('radio', { name: 'Peachy' }).click();
+    await page.getByRole('radio', { name: 'Hearts', exact: true }).click();
+    await page.getByRole('tab', { name: 'Layout' }).click();
+    await page.getByRole('radio', { name: 'Pills' }).click();
+    await page.getByRole('tab', { name: /Stickers/ }).click();
+    await page.getByRole('button', { name: 'Add Heart' }).click();
+    await page.getByRole('button', { name: 'Add Coffee' }).click();
+    await settle(page);
+  };
+  for (const [scheme, viewport, scale, name] of [
+    ['light', DESKTOP, 2, 'card-studio-light'],
+    ['dark', PHONE, 3, 'card-studio-phone-dark'],
+  ] as const) {
+    const s = await signIn(browser, 'alice', scheme, viewport, scale);
+    await designCard(s.page);
+    await s.page.screenshot({ path: `${OUT}${name}.png` });
+    await s.context.close();
+  }
+  {
+    const context = await browser.newContext({
+      viewport: DESKTOP,
+      colorScheme: 'light',
+      deviceScaleFactor: 2,
+    });
+    const page = await context.newPage();
+    await page.goto('/@bob');
+    await expect(page.getByRole('article', { name: 'Bob Carter’s card' })).toBeVisible();
+    await settle(page, 900);
+    await page.screenshot({ path: `${OUT}card-public-light.png` });
+    await context.close();
+  }
+
   await bob.context.close();
   await carol.context.close();
   await dave.context.close();

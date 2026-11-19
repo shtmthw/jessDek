@@ -1,12 +1,23 @@
 import { useMutation, useQuery } from '@apollo/client';
-import { ArrowLeft, Check, LogOut, Monitor, Moon, Play, Sun } from 'lucide-react';
+import {
+  ArrowLeft,
+  Check,
+  Copy,
+  LogOut,
+  Monitor,
+  Moon,
+  Pencil,
+  Play,
+  Share,
+  Sun,
+} from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { Link, useNavigate } from 'react-router';
 import { toast } from 'sonner';
 import { Avatar } from '@/components/Avatar';
-import { Button } from '@/components/Button';
+import { Button, buttonClass } from '@/components/Button';
 import { Field, Input } from '@/components/Input';
 import { Segmented } from '@/components/Segmented';
 import { Switch } from '@/components/Switch';
@@ -21,19 +32,12 @@ import { prefersReducedMotion } from '@/lib/media';
 import { exit, spring } from '@/lib/motion';
 import { playSound, useSoundsEnabled, type SoundKind } from '@/lib/sounds';
 import { useThemePreference, type ThemePreference } from '@/lib/theme';
+import { CardView } from '../card/CardView';
+import { parseCard } from '../card/recipe';
+import { cardUrl, copyCardLink, shareCard } from '../card/share';
+import { useMyCard } from '../card/useMyCard';
 import { useChatActions } from '../chat/useChatActions';
 import { useViewer } from '../session/ViewerProvider';
-
-const COLORS: Array<{ value: string; name: string }> = [
-  { value: '#6366f1', name: 'Indigo' },
-  { value: '#0ea5e9', name: 'Sky' },
-  { value: '#14b8a6', name: 'Teal' },
-  { value: '#22c55e', name: 'Green' },
-  { value: '#eab308', name: 'Amber' },
-  { value: '#f97316', name: 'Orange' },
-  { value: '#ec4899', name: 'Pink' },
-  { value: '#a855f7', name: 'Purple' },
-];
 
 const SOUND_PREVIEWS: Array<{ kind: SoundKind; label: string; hint: string }> = [
   { kind: 'dm', label: 'Direct message', hint: 'When someone messages you' },
@@ -43,8 +47,8 @@ const SOUND_PREVIEWS: Array<{ kind: SoundKind; label: string; hint: string }> = 
 ];
 
 const AUTO_DOWNLOAD: Array<{ value: AutoDownload; label: string }> = [
-  { value: 'all', label: 'Photos & videos' },
-  { value: 'photos', label: 'Photos' },
+  { value: 'all', label: 'Everything' },
+  { value: 'photos', label: 'Photos only' },
   { value: 'off', label: 'Off' },
 ];
 
@@ -113,7 +117,6 @@ export function SettingsPage() {
   const [theme, setTheme] = useThemePreference();
   const [soundsOn, setSoundsOn] = useSoundsEnabled();
   const [displayName, setDisplayName] = useState(viewer.displayName);
-  const [color, setColor] = useState(viewer.avatarColor);
   const [updateProfile, update] = useMutation(UPDATE_PROFILE);
   const [signOut, out] = useMutation(SIGN_OUT);
   const [error, setError] = useState<string | null>(null);
@@ -126,14 +129,14 @@ export function SettingsPage() {
   const [confirmSignOut, setConfirmSignOut] = useState(false);
   const hasMedia = (usage?.photos ?? 0) + (usage?.videos ?? 0) > 0;
 
-  const dirty =
-    (displayName.trim() !== viewer.displayName && displayName.trim() !== '') ||
-    color !== viewer.avatarColor;
+  const dirty = displayName.trim() !== viewer.displayName && displayName.trim() !== '';
 
   async function save() {
     setError(null);
     try {
-      await updateProfile({ variables: { input: { displayName, avatarColor: color } } });
+      await updateProfile({
+        variables: { input: { displayName, avatarColor: viewer.avatarColor } },
+      });
       setSaved(true);
       setTimeout(() => setSaved(false), 1600);
       toast.success('Profile updated');
@@ -176,15 +179,28 @@ export function SettingsPage() {
       >
         <Section id="profile-heading" title="Profile" description="How you appear to others.">
           <div className="flex items-center gap-4">
-            <motion.div
-              key={color}
-              initial={{ scale: 0.9 }}
-              animate={{ scale: 1 }}
-              transition={spring.pop}
+            {/* A big touch target for the same place the Edit button goes. */}
+            <Link
+              to="/settings/avatar"
+              tabIndex={-1}
+              aria-hidden
+              className="group relative shrink-0 rounded-full"
             >
-              <Avatar name={displayName || viewer.username} color={color} size="lg" />
-            </motion.div>
-            <div className="min-w-0">
+              <Avatar
+                name={displayName || viewer.username}
+                color={viewer.avatarColor}
+                avatar={viewer.avatar}
+                size="lg"
+                className="transition-transform duration-200 ease-out-quint motion-safe:group-hover:scale-[1.04] motion-safe:group-active:scale-95"
+              />
+              <span
+                aria-hidden
+                className="absolute -bottom-0.5 -right-0.5 inline-flex size-6 items-center justify-center rounded-full bg-background text-foreground shadow-sm ring-1 ring-border"
+              >
+                <Pencil className="size-3" strokeWidth={2.5} />
+              </span>
+            </Link>
+            <div className="min-w-0 flex-1">
               <p className="truncate text-[17px] font-semibold tracking-tight">
                 {displayName.trim() || viewer.username}
               </p>
@@ -192,6 +208,9 @@ export function SettingsPage() {
                 @{viewer.username} · {viewer.email}
               </p>
             </div>
+            <Link to="/settings/avatar" className={buttonClass('secondary', 'sm')}>
+              Edit avatar
+            </Link>
           </div>
           <Field label="Display name" error={error}>
             {(p) => (
@@ -203,46 +222,6 @@ export function SettingsPage() {
               />
             )}
           </Field>
-          <div>
-            <p className="mb-2.5 text-sm font-medium" id="color-label">
-              Avatar color
-            </p>
-            <div
-              className="flex flex-wrap gap-2 md:gap-2.5"
-              role="radiogroup"
-              aria-labelledby="color-label"
-            >
-              {COLORS.map((c) => {
-                const selected = color === c.value;
-                return (
-                  <button
-                    key={c.value}
-                    type="button"
-                    role="radio"
-                    aria-checked={selected}
-                    aria-label={c.name}
-                    title={c.name}
-                    onClick={() => setColor(c.value)}
-                    className="relative inline-flex size-9 items-center justify-center rounded-full outline-offset-4 md:size-10 transition-transform duration-200 ease-out-quint motion-safe:hover:scale-105 motion-safe:active:scale-95"
-                  >
-                    {selected ? (
-                      <motion.span
-                        layoutId="avatar-color-ring"
-                        aria-hidden
-                        className="absolute -inset-1 rounded-full ring-2 ring-foreground"
-                        transition={spring.snappy}
-                      />
-                    ) : null}
-                    <span
-                      aria-hidden
-                      className="size-8 rounded-full md:size-9"
-                      style={{ backgroundColor: c.value }}
-                    />
-                  </button>
-                );
-              })}
-            </div>
-          </div>
           <Button
             disabled={!dirty}
             loading={update.loading}
@@ -269,6 +248,8 @@ export function SettingsPage() {
             </AnimatePresence>
           </Button>
         </Section>
+
+        <YourCard />
 
         <Section
           id="appearance-heading"
@@ -507,7 +488,7 @@ function BlockedPeople() {
                 exit={{ opacity: 0, transition: exit.fast }}
                 transition={spring.soft}
               >
-                <Avatar name={u.displayName} color={u.avatarColor} size="sm" />
+                <Avatar name={u.displayName} color={u.avatarColor} avatar={u.avatar} size="sm" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-medium">{u.displayName}</span>
                   <span className="block truncate text-xs text-muted-foreground">
@@ -522,6 +503,88 @@ function BlockedPeople() {
           </AnimatePresence>
         </ul>
       )}
+    </Section>
+  );
+}
+
+/** A small look at your card, a way to edit and share it, and whether the link is public. */
+function YourCard() {
+  const viewer = useViewer();
+  const mine = useMyCard();
+  const card = parseCard(mine.data?.recipe ?? null);
+  const shared = mine.data?.shared ?? false;
+
+  async function setShared(next: boolean) {
+    try {
+      await mine.save({ shared: next });
+      toast.success(next ? 'Your card link is on' : 'Your card link is off');
+    } catch {
+      toast.error('Couldn’t change that. Try again.');
+    }
+  }
+
+  return (
+    <Section id="card-heading" title="Your card" description="What people see when they tap you.">
+      <div className="flex items-center gap-5">
+        <Link to="/settings/card" aria-label="Edit your card" className="shrink-0 rounded-xl">
+          <CardView
+            card={card}
+            user={{ ...viewer, avatar: viewer.avatar }}
+            width={132}
+            hideStickers={false}
+            className="transition-transform duration-200 ease-out-quint motion-safe:hover:-rotate-2 motion-safe:hover:scale-[1.03]"
+          />
+        </Link>
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <Link to="/settings/card" className={buttonClass('secondary', 'sm', 'justify-start')}>
+            <Pencil className="size-4" /> Edit card
+          </Link>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="justify-start"
+            onClick={() => void shareCard(viewer)}
+          >
+            <Share className="size-4" /> Share
+          </Button>
+        </div>
+      </div>
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <span id="card-shared-label" className="text-sm font-medium">
+            Share my card
+          </span>
+          <p id="card-shared-hint" className="mt-0.5 text-xs text-muted-foreground">
+            Anyone with the link can see your card, even without an account. People on Realtime can
+            always see it.
+          </p>
+        </div>
+        <Switch
+          checked={shared}
+          onChange={(next) => void setShared(next)}
+          aria-labelledby="card-shared-label"
+          aria-describedby="card-shared-hint"
+        />
+      </div>
+      <AnimatePresence initial={false}>
+        {shared ? (
+          <motion.div
+            key="link"
+            className="flex items-center gap-2 overflow-hidden rounded-xl border border-border py-1.5 pl-3.5 pr-1.5"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0, transition: exit.fast }}
+            transition={spring.soft}
+          >
+            <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
+              {cardUrl(viewer.username)}
+            </span>
+            <Button variant="ghost" size="sm" onClick={() => void copyCardLink(viewer.username)}>
+              <Copy className="size-4" /> Copy
+            </Button>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </Section>
   );
 }

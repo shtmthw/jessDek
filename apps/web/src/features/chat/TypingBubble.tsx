@@ -39,7 +39,7 @@ export function TypingBubble({ typers, group }: { typers: Typer[]; group: boolea
                 exit={{ opacity: 0, scale: 0.6, transition: exit.fast }}
                 transition={spring.pop}
               >
-                <Avatar name={t.name} color={t.color} size="sm" />
+                <Avatar name={t.name} color={t.color} avatar={t.avatar} size="sm" />
               </motion.span>
             ))}
           </AnimatePresence>

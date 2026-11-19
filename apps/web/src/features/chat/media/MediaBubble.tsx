@@ -1,4 +1,4 @@
-import type { MouseEvent } from 'react';
+import type { MouseEvent, ReactNode } from 'react';
 import { cn } from '@/lib/cn';
 import type { MediaItem } from '@/lib/messages';
 import { bubbleCorners } from '../bubbleStyle';
@@ -18,6 +18,8 @@ export function MediaBubble({
   senderName,
   onToggleTime,
   onOpen,
+  quote,
+  flash,
 }: {
   items: MediaItem[];
   caption: string;
@@ -30,11 +32,17 @@ export function MediaBubble({
   senderName: string;
   onToggleTime: (e: MouseEvent<HTMLElement>) => void;
   onOpen: (index: number) => void;
+  /** The quoted message, when this is a reply: shown above the pictures. */
+  quote?: ReactNode;
+  /** Briefly ring the bubble (it's the message a quote jumped to). */
+  flash?: boolean;
 }) {
   return (
     <div
+      data-bubble
       className={cn(
         'relative w-fit max-w-full overflow-hidden',
+        flash && 'message-flash',
         bubbleCorners(mine, first, last),
         'transition-[border-radius,opacity] duration-300 ease-out-quint',
         mine ? 'bg-brand text-brand-foreground' : 'bg-bubble text-foreground',
@@ -44,6 +52,10 @@ export function MediaBubble({
           "after:pointer-events-none after:absolute after:inset-0 after:rounded-[inherit] after:ring-1 after:ring-inset after:ring-black/5 after:content-[''] dark:after:ring-white/10",
       )}
     >
+      {quote ? (
+        // `w-0 min-w-full`: the quote fits the width of the pictures instead of widening them.
+        <div className="w-0 min-w-full px-1.5 pt-1.5">{quote}</div>
+      ) : null}
       <MediaGrid
         items={items}
         conversationId={conversationId}

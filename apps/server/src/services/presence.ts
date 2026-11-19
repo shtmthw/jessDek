@@ -1,3 +1,4 @@
+import type { User } from '@prisma/client';
 import { prisma } from '../db.js';
 import { publishToUsers } from '../pubsub.js';
 import { withoutBlocked } from './blocks.js';
@@ -8,7 +9,8 @@ const connections = new Map<string, number>();
 
 export const isOnline = (userId: string) => (connections.get(userId) ?? 0) > 0;
 
-async function peersOf(userId: string): Promise<string[]> {
+/** Everyone who shares at least one conversation with `userId`. */
+export async function peersOf(userId: string): Promise<string[]> {
   const rows = await prisma.conversationMember.findMany({
     where: { userId: { not: userId }, conversation: { members: { some: { userId } } } },
     select: { userId: true },
@@ -54,4 +56,9 @@ export async function announcePresence(userId: string, viewers: string[], hidden
     online: hidden ? false : isOnline(userId),
     lastSeenAt: hidden ? null : user.lastSeenAt,
   });
+}
+
+/** Tells the user's other tabs, and everyone who shares a chat with them, about a new name or avatar. */
+export async function announceUser(user: User): Promise<void> {
+  publishToUsers([user.id, ...(await peersOf(user.id))], { __typename: 'UserUpdated', user });
 }

@@ -28,7 +28,30 @@ export interface ConversationView {
   canMessage: boolean;
   /** Groups: the member who can rename it and remove people. */
   ownerId: string | null;
+  /** The newest reaction by the viewer or on the viewer's message, if newer than the last message. */
+  lastReaction: ReactionPreviewRow | null;
 }
+
+const reactionPreviewInclude = {
+  user: true,
+  message: { include: messageInclude },
+} satisfies Prisma.ReactionInclude;
+
+export type ReactionPreviewRow = Prisma.ReactionGetPayload<{
+  include: typeof reactionPreviewInclude;
+}>;
+
+/** What the chat list says about reactions: only yours, or ones on your messages. */
+const lastReactionFor = (userId: string, conversationId: string, after: Date) =>
+  prisma.reaction.findFirst({
+    where: {
+      updatedAt: { gt: after },
+      message: { conversationId },
+      OR: [{ userId }, { message: { senderId: userId } }],
+    },
+    orderBy: { updatedAt: 'desc' },
+    include: reactionPreviewInclude,
+  });
 
 const groupNameSchema = z
   .string({ required_error: 'Give the group a name' })
@@ -83,6 +106,7 @@ async function toView(userId: string, row: Row): Promise<ConversationView> {
     blockedByMe,
     canMessage,
     ownerId: row.members.find((m) => m.role === 'OWNER')?.userId ?? null,
+    lastReaction: await lastReactionFor(userId, row.id, row.lastMessageAt),
   };
 }
 

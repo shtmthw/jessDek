@@ -1,4 +1,6 @@
 import { Users } from 'lucide-react';
+import { AvatarFigure, VIEW_AVATAR, VIEW_CLOSE } from '@/features/avatar/AvatarFigure';
+import { parseRecipe } from '@/features/avatar/recipe';
 import { cn } from '@/lib/cn';
 
 const sizes = {
@@ -23,9 +25,14 @@ const initials = (name: string) =>
     .map((p) => p[0]?.toUpperCase() ?? '')
     .join('') || '?';
 
+/**
+ * Someone's avatar: their character drawn on their colour, or their initials if they chose that.
+ * `avatar` is the recipe JSON from the server; null or missing means the default character.
+ */
 export function Avatar({
   name,
   color,
+  avatar,
   size = 'md',
   online,
   group,
@@ -33,17 +40,19 @@ export function Avatar({
 }: {
   name: string;
   color?: string;
+  avatar?: string | null;
   size?: keyof typeof sizes;
   online?: boolean;
   group?: boolean;
   className?: string;
 }) {
+  const recipe = group ? null : parseRecipe(avatar);
   return (
     <span className={cn('relative inline-flex shrink-0', className)}>
       <span
         aria-hidden
         className={cn(
-          'inline-flex select-none items-center justify-center rounded-full font-semibold tracking-tight text-white',
+          'relative inline-flex select-none items-center justify-center overflow-hidden rounded-full font-semibold tracking-tight text-white',
           'transition-[background-color] duration-300 ease-out-quint',
           group && 'bg-muted text-muted-foreground ring-1 ring-inset ring-border',
           sizes[size],
@@ -52,6 +61,12 @@ export function Avatar({
       >
         {group ? (
           <Users className={size === 'sm' || size === 'xs' ? 'size-3.5' : 'size-[42%]'} />
+        ) : recipe?.style === 'character' ? (
+          <AvatarFigure
+            recipe={recipe}
+            viewBox={size === 'xs' || size === 'sm' ? VIEW_CLOSE : VIEW_AVATAR}
+            className="absolute inset-0 size-full"
+          />
         ) : (
           initials(name)
         )}

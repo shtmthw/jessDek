@@ -1,11 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../src/app.js';
 import { prisma } from '../src/db.js';
-import { signInLimiter } from '../src/services/users.js';
+import { avatarLimiter, signInLimiter } from '../src/services/users.js';
 import { clearRelays } from '../src/relay.js';
 import { clearBlockCache } from '../src/services/blocks.js';
+import { cardLimiter } from '../src/services/cards.js';
 import { resetMediaState } from '../src/services/media.js';
 import { sendLimiter, typingLimiter } from '../src/services/messages.js';
+import { reactLimiter } from '../src/services/reactions.js';
 import { clearPeers } from '../src/services/peers.js';
 
 export async function resetDb() {
@@ -20,8 +22,11 @@ export async function resetDb() {
   resetMediaState();
   clearRelays();
   signInLimiter.clear();
+  avatarLimiter.clear();
   sendLimiter.clear();
   typingLimiter.clear();
+  reactLimiter.clear();
+  cardLimiter.clear();
 }
 
 export interface GqlResult<T = Record<string, any>> {

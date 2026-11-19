@@ -1,5 +1,5 @@
 import { useApolloClient, useMutation } from '@apollo/client';
-import { Check, Loader2, Search, UserRoundSearch, X } from 'lucide-react';
+import { Check, IdCard, Loader2, Search, UserRoundSearch, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router';
@@ -13,6 +13,7 @@ import { cn } from '@/lib/cn';
 import { upsertConversation } from '@/lib/cacheUpdates';
 import { CREATE_GROUP, SEARCH_USERS, START_DIRECT, type User } from '@/lib/gql';
 import { expectOwnConversation } from '@/lib/sounds';
+import { useOpenCard } from '../card/CardDialogProvider';
 import { exit, spring } from '@/lib/motion';
 
 type Tab = 'direct' | 'group';
@@ -68,6 +69,7 @@ export function UserPicker({
   busyId?: string | null;
 }) {
   const client = useApolloClient();
+  const openCard = useOpenCard();
   const [query, setQuery] = useState('');
   const debounced = useDebounced(query.trim().replace(/^@/, ''), 200);
   const list = useRef<HTMLUListElement>(null);
@@ -178,6 +180,7 @@ export function UserPicker({
             return (
               <motion.li
                 key={u.id}
+                className="flex items-center gap-1"
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ ...spring.soft, delay: Math.min(i, 6) * 0.03 }}
@@ -187,13 +190,19 @@ export function UserPicker({
                   data-user
                   onClick={() => onPick(u)}
                   className={cn(
-                    'flex min-h-12 w-full items-center gap-3 rounded-xl px-2 py-1.5 text-left outline-offset-[-2px] transition-colors',
+                    'flex min-h-12 min-w-0 flex-1 items-center gap-3 rounded-xl px-2 py-1.5 text-left outline-offset-[-2px] transition-colors',
                     picked
                       ? 'bg-brand/8 hover:bg-brand/12'
                       : 'hover:bg-muted focus-visible:bg-muted',
                   )}
                 >
-                  <Avatar name={u.displayName} color={u.avatarColor} online={u.online} size="md" />
+                  <Avatar
+                    name={u.displayName}
+                    color={u.avatarColor}
+                    avatar={u.avatar}
+                    online={u.online}
+                    size="md"
+                  />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-semibold">{u.displayName}</span>
                     <span className="block truncate text-xs text-muted-foreground">
@@ -221,6 +230,15 @@ export function UserPicker({
                     </AnimatePresence>
                   </span>
                 </button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={`See ${u.displayName}'s card`}
+                  title="See their card"
+                  onClick={() => openCard(u)}
+                >
+                  <IdCard className="size-[18px]" />
+                </Button>
               </motion.li>
             );
           })
@@ -354,7 +372,12 @@ export function NewChatDialog({
                       aria-label={`Remove ${m.displayName}`}
                       className="inline-flex h-8 items-center gap-1.5 rounded-full bg-muted pl-1 pr-2.5 text-sm font-medium transition-colors hover:bg-border/70"
                     >
-                      <Avatar name={m.displayName} color={m.avatarColor} size="xs" />
+                      <Avatar
+                        name={m.displayName}
+                        color={m.avatarColor}
+                        avatar={m.avatar}
+                        size="xs"
+                      />
                       {m.displayName.split(' ')[0]}
                       <X className="size-3.5 text-muted-foreground" />
                     </button>

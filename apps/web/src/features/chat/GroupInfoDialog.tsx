@@ -30,6 +30,7 @@ import {
 } from '@/lib/gql';
 import { exit, spring } from '@/lib/motion';
 import { UserPicker } from '../conversations/NewChatDialog';
+import { useOpenCard } from '../card/CardDialogProvider';
 import { useViewer } from '../session/ViewerProvider';
 import { useChatActions } from './useChatActions';
 
@@ -54,6 +55,7 @@ export function GroupInfoDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const viewer = useViewer();
+  const openCard = useOpenCard();
   const client = useApolloClient();
   const navigate = useNavigate();
   const [name, setName] = useState(conversation.title);
@@ -188,26 +190,37 @@ export function GroupInfoDialog({
               exit={{ opacity: 0, transition: exit.fast }}
               transition={spring.soft}
             >
-              <Avatar
-                name={m.displayName}
-                color={m.avatarColor}
-                online={m.online || m.id === viewer.id}
-              />
-              <div className="min-w-0 flex-1">
-                <p className="flex items-center gap-1 truncate text-sm font-semibold">
-                  <span className="truncate">{m.displayName}</span>
-                  {m.id === viewer.id ? (
-                    <span className="font-normal text-muted-foreground"> (you)</span>
-                  ) : null}
-                  {m.id === conversation.ownerId ? (
-                    <Crown className="size-3.5 shrink-0 text-muted-foreground" aria-label="Owner" />
-                  ) : null}
-                </p>
-                <p className="truncate text-xs text-muted-foreground">
-                  @{m.username}
-                  {blocked.has(m.id) ? ' · Blocked' : ''}
-                </p>
-              </div>
+              <button
+                type="button"
+                onClick={() => openCard(m)}
+                aria-label={`${m.displayName}, see their card`}
+                className="-my-1 flex min-w-0 flex-1 items-center gap-3 rounded-xl py-1 text-left transition-colors hover:bg-muted/70"
+              >
+                <Avatar
+                  name={m.displayName}
+                  color={m.avatarColor}
+                  avatar={m.avatar}
+                  online={m.online || m.id === viewer.id}
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="flex items-center gap-1 truncate text-sm font-semibold">
+                    <span className="truncate">{m.displayName}</span>
+                    {m.id === viewer.id ? (
+                      <span className="font-normal text-muted-foreground"> (you)</span>
+                    ) : null}
+                    {m.id === conversation.ownerId ? (
+                      <Crown
+                        className="size-3.5 shrink-0 text-muted-foreground"
+                        aria-label="Owner"
+                      />
+                    ) : null}
+                  </p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    @{m.username}
+                    {blocked.has(m.id) ? ' · Blocked' : ''}
+                  </p>
+                </div>
+              </button>
               {m.id !== viewer.id ? (
                 <Menu
                   trigger={

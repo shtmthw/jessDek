@@ -16,7 +16,13 @@ import {
 } from '@/features/media';
 import { onPresence, onReconnect } from '@/features/media/downloads';
 import { forgetConversation } from '@/features/media/store';
-import { appendMessage, removeConversation, upsertConversation } from '@/lib/cacheUpdates';
+import {
+  appendMessage,
+  applyReactions,
+  applyUser,
+  removeConversation,
+  upsertConversation,
+} from '@/lib/cacheUpdates';
 import { useConnectionState } from '@/lib/connection';
 import { CONVERSATIONS, EVENTS, MARK_READ, MESSAGE_FIELDS, type Message } from '@/lib/gql';
 import { isOwnConversationExpected, playSound, primeAudio } from '@/lib/sounds';
@@ -178,7 +184,27 @@ export function EventsProvider({ children }: { children: ReactNode }) {
             event.user.id,
             event.user.displayName,
             event.user.avatarColor,
+            event.user.avatar,
           );
+          break;
+        case 'UserUpdated':
+          applyUser(client, event.user);
+          // Your own Viewer entry (the sidebar, Settings, the studio) is a separate object.
+          if (event.user.id === viewer.id) {
+            client.cache.modify({
+              id: client.cache.identify({ __typename: 'Viewer', id: viewer.id }),
+              fields: {
+                displayName: () => event.user.displayName,
+                avatarColor: () => event.user.avatarColor,
+                avatar: () => event.user.avatar,
+              },
+            });
+          }
+          break;
+        case 'ReactionChanged':
+          // Quiet by design: no sound, no unread. The chat-list line, where it changes, comes as
+          // its own ConversationUpdated.
+          applyReactions(client, event.message);
           break;
         case 'PresenceChanged':
           client.cache.modify({

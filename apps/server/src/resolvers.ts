@@ -5,12 +5,14 @@ import { signSession } from './auth.js';
 import { config } from './config.js';
 import { fail } from './errors.js';
 import { pubsub, userTopic } from './pubsub.js';
+import * as cards from './services/cards.js';
 import * as conversations from './services/conversations.js';
 import * as media from './services/media.js';
 import * as messages from './services/messages.js';
+import * as reactions from './services/reactions.js';
 import { blockedBetween, listBlocked } from './services/blocks.js';
 import * as safety from './services/safety.js';
-import { isOnline } from './services/presence.js';
+import { announceUser, isOnline } from './services/presence.js';
 import * as users from './services/users.js';
 import type { MessageWithSender, ServerEvent } from './types.js';
 
@@ -33,6 +35,8 @@ export const resolvers = {
       users.searchUsers(requireUser(ctx), query),
     mediaConfig: (_: unknown, __: unknown, ctx: Context) => (requireUser(ctx), { ...config.media }),
     blockedUsers: (_: unknown, __: unknown, ctx: Context) => listBlocked(requireUser(ctx)),
+    card: (_: unknown, { username }: { username: string }, ctx: Context) =>
+      cards.getCard(ctx.userId, username),
   },
 
   Mutation: {
@@ -54,8 +58,19 @@ export const resolvers = {
       ctx.session.token = null;
       return true;
     },
-    updateProfile: (_: unknown, { input }: { input: unknown }, ctx: Context) =>
-      users.updateProfile(requireUser(ctx), input),
+    updateProfile: async (_: unknown, { input }: { input: unknown }, ctx: Context) => {
+      const user = await users.updateProfile(requireUser(ctx), input);
+      await announceUser(user);
+      return user;
+    },
+    updateAvatar: async (_: unknown, { input }: { input: unknown }, ctx: Context) => {
+      const user = await users.updateAvatar(requireUser(ctx), input);
+      await announceUser(user);
+      return user;
+    },
+
+    updateCard: (_: unknown, { input }: { input: unknown }, ctx: Context) =>
+      cards.updateCard(requireUser(ctx), input),
 
     startDirect: (_: unknown, { username }: { username: string }, ctx: Context) =>
       conversations.startDirect(requireUser(ctx), username),
@@ -83,9 +98,23 @@ export const resolvers = {
 
     sendMessage: (
       _: unknown,
-      args: { conversationId: string; body: string; attachments?: unknown },
+      args: {
+        conversationId: string;
+        body: string;
+        attachments?: unknown;
+        replyToId?: string | null;
+      },
       ctx: Context,
-    ) => messages.sendMessage(requireUser(ctx), args.conversationId, args.body, args.attachments),
+    ) =>
+      messages.sendMessage(
+        requireUser(ctx),
+        args.conversationId,
+        args.body,
+        args.attachments,
+        args.replyToId,
+      ),
+    react: (_: unknown, args: { messageId: string; emoji?: string | null }, ctx: Context) =>
+      reactions.react(requireUser(ctx), args.messageId, args.emoji),
     requestMedia: (
       _: unknown,
       args: { attachmentId: string; part: 'FILE' | 'POSTER' },
@@ -134,11 +163,12 @@ export const resolvers = {
   },
 
   User: {
-    // Presence never crosses a block, in either direction.
+    // Presence never crosses a block, in either direction, and never reaches signed-out
+    // visitors (the public card page).
     online: async (u: User, _: unknown, ctx: Context) =>
-      ctx.userId && (await blockedBetween(ctx.userId, u.id)) ? false : isOnline(u.id),
+      !ctx.userId || (await blockedBetween(ctx.userId, u.id)) ? false : isOnline(u.id),
     lastSeenAt: async (u: User, _: unknown, ctx: Context) =>
-      ctx.userId && (await blockedBetween(ctx.userId, u.id)) ? null : iso(u.lastSeenAt),
+      !ctx.userId || (await blockedBetween(ctx.userId, u.id)) ? null : iso(u.lastSeenAt),
   },
 
   Conversation: {
@@ -149,5 +179,16 @@ export const resolvers = {
   Message: {
     createdAt: (m: MessageWithSender) => iso(m.createdAt),
     attachments: (m: MessageWithSender) => m.attachments ?? [],
+    // A quoted message is loaded one level deep: its own quote and reactions aren't.
+    replyTo: (m: Partial<MessageWithSender>) => m.replyTo ?? null,
+    reactions: (m: Partial<MessageWithSender>) => m.reactions ?? [],
+  },
+
+  Reaction: {
+    reactedAt: (r: { updatedAt: Date }) => iso(r.updatedAt),
+  },
+
+  ReactionPreview: {
+    reactedAt: (r: { updatedAt: Date }) => iso(r.updatedAt),
   },
 };

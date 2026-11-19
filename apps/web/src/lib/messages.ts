@@ -1,3 +1,4 @@
+import type { Reaction, ReplyTo } from './gql';
 import { formatClock, formatDayLabel } from './time';
 
 /** A photo or video in a message, as the timeline draws it (from the server, or your own pending send). */
@@ -25,7 +26,17 @@ export interface ChatMessage {
   id: string;
   body: string;
   createdAt: string;
-  sender: { id: string; displayName: string; avatarColor: string };
+  sender: {
+    id: string;
+    displayName: string;
+    avatarColor: string;
+    avatar?: string | null;
+    username?: string;
+  };
+  /** The message this one replies to. */
+  replyTo?: ReplyTo | null;
+  /** One per person, in the order they first reacted. */
+  reactions?: Reaction[];
   attachments?: MediaItem[];
 }
 

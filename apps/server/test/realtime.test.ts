@@ -38,6 +38,8 @@ const EVENTS = `subscription { events {
   ... on ConversationUpdated { conversationId conversation { title unreadCount } }
   ... on MediaRequested { requestId conversationId attachmentId part sha256 fromUserId fromPeerId }
   ... on MediaSignal { requestId type payload fromUserId fromPeerId }
+  ... on UserUpdated { user { username displayName avatarColor avatar } }
+  ... on ReactionChanged { conversationId message { id reactions { emoji user { username } } } }
 } }`;
 
 /** Opens a subscription as the given (signed-in) client and collects what arrives. */
@@ -191,6 +193,71 @@ describe('realtime events', () => {
       ),
     );
     expect(bob.errors).toEqual([]);
+  });
+
+  it('tells the user’s tabs and people in shared chats about a new avatar or name, nobody else', async () => {
+    const { a, b, eve } = await setup();
+    const aliceTab = listen(a.cookie);
+    const bob = listen(b.cookie);
+    const spy = listen(eve.cookie);
+    await settle();
+
+    const avatar = JSON.stringify({ v: 1, style: 'character', hair: 'afro' });
+    await a.gql(`mutation($i: UpdateAvatarInput!) { updateAvatar(input: $i) { id } }`, {
+      i: { avatarColor: '#ec4899', avatar },
+    });
+    const expected = { username: 'alice', avatarColor: '#ec4899', avatar };
+    await until(() => types(bob, 'UserUpdated').length === 1);
+    await until(() => types(aliceTab, 'UserUpdated').length === 1);
+    expect(types(bob, 'UserUpdated')[0].user).toMatchObject(expected);
+    expect(types(aliceTab, 'UserUpdated')[0].user).toMatchObject(expected);
+
+    await a.gql(
+      `mutation { updateProfile(input: { displayName: "Ali", avatarColor: "#ec4899" }) { id } }`,
+    );
+    await until(() => types(bob, 'UserUpdated').length === 2);
+    expect(types(bob, 'UserUpdated')[1].user.displayName).toBe('Ali');
+
+    await settle();
+    expect(types(spy, 'UserUpdated')).toEqual([]);
+  });
+
+  it('sends reaction changes to every member, and chat-list updates to the reactor and author only', async () => {
+    const { a, b, eve } = await setup();
+    const carol = new Client(app);
+    await signUp(carol, 'carol');
+    const g = (
+      await a.gql(`mutation { createGroup(name: "Trip", usernames: ["bob", "carol"]) { id } }`)
+    ).data!.createGroup;
+    const msg = (
+      await a.gql(`mutation($c: ID!) { sendMessage(conversationId: $c, body: "7pm?") { id } }`, {
+        c: g.id,
+      })
+    ).data!.sendMessage;
+    const alice = listen(a.cookie);
+    const bob = listen(b.cookie);
+    const carolTab = listen(carol.cookie);
+    const spy = listen(eve.cookie);
+    await settle();
+
+    await b.gql(`mutation($m: ID!) { react(messageId: $m, emoji: "👍") { id } }`, { m: msg.id });
+    for (const peer of [alice, bob, carolTab])
+      await until(() => types(peer, 'ReactionChanged').length === 1);
+    expect(types(carolTab, 'ReactionChanged')[0]).toEqual({
+      __typename: 'ReactionChanged',
+      conversationId: g.id,
+      message: { id: msg.id, reactions: [{ emoji: '👍', user: { username: 'bob' } }] },
+    });
+    // The chat-list line can only change for bob (reactor) and alice (author).
+    await until(() => types(alice, 'ConversationUpdated').length === 1);
+    await until(() => types(bob, 'ConversationUpdated').length === 1);
+
+    // Setting the same emoji again changes nothing and sends nothing.
+    await b.gql(`mutation($m: ID!) { react(messageId: $m, emoji: "👍") { id } }`, { m: msg.id });
+    await settle();
+    expect(types(alice, 'ReactionChanged')).toHaveLength(1);
+    expect(types(carolTab, 'ConversationUpdated')).toEqual([]);
+    expect(spy.events).toEqual([]);
   });
 
   it('refuses unauthenticated sockets', async () => {

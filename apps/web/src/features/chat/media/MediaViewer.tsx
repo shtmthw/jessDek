@@ -3,7 +3,9 @@ import { ChevronLeft, ChevronRight, Download, Share, X } from 'lucide-react';
 import {
   animate,
   motion,
+  useMotionTemplate,
   useMotionValue,
+  useMotionValueEvent,
   useReducedMotion,
   useTransform,
   type MotionValue,
@@ -36,6 +38,8 @@ export interface ViewerEntry {
   messageId: string;
   senderName: string;
   senderColor?: string;
+  /** The sender's avatar recipe (JSON); null for the default character. */
+  senderAvatar?: string | null;
   createdAt: string;
   caption: string;
 }
@@ -49,10 +53,12 @@ const DISMISS_VELOCITY = 600;
 const EDGE_ELASTIC = 0.12;
 const DOUBLE_TAP_MS = 250;
 const LOCK_PX = 8;
-const ZOOM_TOGGLE = 2.5;
 const ZOOM_MAX = 4;
 const CHROME_IDLE_MS = 3000;
 const TILE_RADIUS = 18;
+// The clip opens quickly on the way out of the list, and closes a little ahead of the landing.
+const CLIP_OPEN = { duration: 0.22, ease: [0.22, 1, 0.36, 1] } as const;
+const CLIP_CLOSE = { duration: 0.24, ease: [0.4, 0, 0.2, 1] } as const;
 
 interface Rect {
   left: number;
@@ -79,6 +85,32 @@ function tileRect(key: string): Rect | null {
   const r = el.getBoundingClientRect();
   const visible = r.bottom > 0 && r.top < window.innerHeight && r.width > 0;
   return visible ? { left: r.left, top: r.top, width: r.width, height: r.height } : null;
+}
+
+interface Insets {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+const NO_INSETS: Insets = { top: 0, right: 0, bottom: 0, left: 0 };
+
+/**
+ * The visible part of the message list around the tile, as insets from the screen's edges. The
+ * flying picture is clipped to it near the tile, so it slides under the chat header and the
+ * composer the way the tile does, instead of covering them.
+ */
+function listInsets(key: string): Insets | null {
+  const tile = document.querySelector<HTMLElement>(`[data-media-tile="${CSS.escape(key)}"]`);
+  const list = tile?.closest<HTMLElement>('[role="log"]');
+  if (!list) return null;
+  const r = list.getBoundingClientRect();
+  return {
+    top: Math.max(0, r.top),
+    right: Math.max(0, window.innerWidth - r.right),
+    bottom: Math.max(0, window.innerHeight - r.bottom),
+    left: Math.max(0, r.left),
+  };
 }
 
 function useViewport() {
@@ -116,6 +148,7 @@ function Slide({
   active,
   boxStyle,
   zoomStyle,
+  zoomed,
 }: {
   entry: ViewerEntry;
   conversationId: string;
@@ -124,6 +157,11 @@ function Slide({
   /** The active slide's box is animated (open / close / dismiss). */
   boxStyle?: Record<string, MotionValue<number> | number>;
   zoomStyle?: Record<string, MotionValue<number>>;
+  /**
+   * Zoomed in: the picture may spread over the whole screen. Its box (the fitted, letterboxed
+   * rectangle) only clips while it's at rest or flying, for the rounded corners and the crop.
+   */
+  zoomed?: boolean;
 }) {
   const { item } = entry;
   const isVideo = item.kind === 'VIDEO';
@@ -157,7 +195,7 @@ function Slide({
 
   return (
     <motion.div
-      className="absolute overflow-hidden"
+      className={cn('absolute', zoomed ? 'overflow-visible' : 'overflow-hidden')}
       data-viewer-box={active ? '' : undefined}
       style={boxStyle ?? { left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
     >
@@ -272,9 +310,31 @@ export default function MediaViewer({
   const boxRadius = useMotionValue(0);
   const boxOpacity = useMotionValue(1);
   const boxScale = useMotionValue(1);
+  // Clip for the open / close flights (see listInsets); none while the viewer is open.
+  const clipTop = useMotionValue(0);
+  const clipRight = useMotionValue(0);
+  const clipBottom = useMotionValue(0);
+  const clipLeft = useMotionValue(0);
+  const clipPath = useMotionTemplate`inset(${clipTop}px ${clipRight}px ${clipBottom}px ${clipLeft}px)`;
+  const setClip = (c: Insets) => {
+    clipTop.set(c.top);
+    clipRight.set(c.right);
+    clipBottom.set(c.bottom);
+    clipLeft.set(c.left);
+  };
+  const animateClip = (c: Insets, transition: object) =>
+    Promise.all([
+      animate(clipTop, c.top, transition),
+      animate(clipRight, c.right, transition),
+      animate(clipBottom, c.bottom, transition),
+      animate(clipLeft, c.left, transition),
+    ]);
   const zoom = useMotionValue(1);
   const panX = useMotionValue(0);
   const panY = useMotionValue(0);
+  // Re-renders only when it crosses 1 (setState with the same value is a no-op).
+  const [zoomed, setZoomed] = useState(false);
+  useMotionValueEvent(zoom, 'change', (v) => setZoomed(v > 1.001));
 
   const content = useRef<HTMLDivElement>(null);
   // Whatever had focus when the viewer opened (the tile), for when it closes.
@@ -310,6 +370,12 @@ export default function MediaViewer({
       setBox(from);
       boxRadius.set(TILE_RADIUS);
       void animateBox(target, 0, spring.panel);
+      // Starts inside the list (under the header, above the composer) and opens up to the screen.
+      const insets = listInsets(item.key);
+      if (insets) {
+        setClip(insets);
+        void animateClip(NO_INSETS, CLIP_OPEN);
+      }
     } else {
       setBox(target);
       boxOpacity.set(0);
@@ -371,6 +437,9 @@ export default function MediaViewer({
       }
       const fade = animate(openness, 0, { duration: reduced ? 0.12 : 0.22 });
       if (to) {
+        // Closes down to the list's area as it lands, so it tucks under the header like the tile.
+        const insets = listInsets(item.key);
+        if (insets) void animateClip(insets, CLIP_CLOSE);
         await animateBox(to, TILE_RADIUS, spring.panel, fromDrag?.velocityY ?? 0);
       } else {
         await Promise.all([
@@ -465,11 +534,35 @@ export default function MediaViewer({
     void animate(panX, next === 1 ? 0 : nx, transition);
     void animate(panY, next === 1 ? 0 : ny, transition);
   };
-  const settlePan = () => {
+  /** Double-tap goes to the zoom that fills the screen (a landscape photo on a phone: its height), at least 2×. */
+  const fillZoom = () => clamp(Math.max(W / target.width, H / target.height), 2, ZOOM_MAX);
+  /**
+   * Letting go of a zoomed picture: it coasts on with the flick's speed (to where that speed would
+   * carry it, about a fifth of a second's worth) and comes to rest against the edges.
+   */
+  const glide = (vx: number, vy: number) => {
     const b = bounds(zoom.get());
-    void animate(panX, clamp(panX.get(), -b.x, b.x), spring.soft);
-    void animate(panY, clamp(panY.get(), -b.y, b.y), spring.soft);
+    const coast = (v: number) => clamp(v * 0.22, -900, 900);
+    void animate(panX, clamp(panX.get() + coast(vx), -b.x, b.x), { ...spring.panel, velocity: vx });
+    void animate(panY, clamp(panY.get() + coast(vy), -b.y, b.y), { ...spring.panel, velocity: vy });
   };
+  /**
+   * The end of every zoom or pan, however the fingers came off: back inside 1×–4× (around the
+   * point the fingers were on, so nothing jumps), or a glide if it's already in range.
+   */
+  const settle = (focal: { x: number; y: number }, vx = 0, vy = 0) => {
+    const s = zoom.get();
+    if (s <= 1.01) zoomTo(1, W / 2, H / 2);
+    else if (s > ZOOM_MAX) zoomTo(ZOOM_MAX, focal.x, focal.y);
+    else glide(vx, vy);
+  };
+  /** Pinching past the limits meets growing resistance instead of a wall. */
+  const resist = (s: number) =>
+    s > ZOOM_MAX
+      ? ZOOM_MAX * (1 + 0.3 * Math.log(s / ZOOM_MAX))
+      : s < 1
+        ? Math.max(0.6, 1 - (1 - s) * 0.45)
+        : s;
 
   // ---- chrome: tap to toggle, and on desktop it rests after a few still seconds ----
   const idle = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -493,8 +586,22 @@ export default function MediaViewer({
     pan0: { x: number; y: number };
     zoom0: number;
     dist0: number;
+    /** Where the pinch began: the picture point under it stays under the fingers. */
+    mid0: { x: number; y: number };
+    /** The latest point the fingers were on, to settle the zoom around. */
+    focal: { x: number; y: number };
     samples: { t: number; x: number; y: number }[];
-  }>({ kind: 'none', x0: 0, y0: 0, pan0: { x: 0, y: 0 }, zoom0: 1, dist0: 1, samples: [] });
+  }>({
+    kind: 'none',
+    x0: 0,
+    y0: 0,
+    pan0: { x: 0, y: 0 },
+    zoom0: 1,
+    dist0: 1,
+    mid0: { x: 0, y: 0 },
+    focal: { x: 0, y: 0 },
+    samples: [],
+  });
   const lastTap = useRef<{ t: number; x: number; y: number } | null>(null);
   const singleTap = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -512,13 +619,20 @@ export default function MediaViewer({
     if ((e.target as HTMLElement).closest('button, a, video, [data-viewer-chrome]')) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    // A finger catches a gliding (or settling) picture where it is.
+    zoom.stop();
+    panX.stop();
+    panY.stop();
     const g = gesture.current;
     if (pointers.current.size === 2) {
-      const { dist } = spread();
+      const { dist, mid } = spread();
       Object.assign(g, {
         kind: 'pinch',
         zoom0: zoom.get(),
-        dist0: dist,
+        // Fingers landing almost on top of each other would make every pixel a huge zoom step.
+        dist0: Math.max(dist, 32),
+        mid0: mid,
+        focal: mid,
         pan0: { x: panX.get(), y: panY.get() },
       });
       void animate(trackX, 0, spring.panel);
@@ -541,12 +655,15 @@ export default function MediaViewer({
     const g = gesture.current;
     if (g.kind === 'pinch' && pointers.current.size === 2) {
       const { dist, mid } = spread();
-      const s = clamp((g.zoom0 * dist) / g.dist0, 0.85, ZOOM_MAX * 1.15);
-      const rx = mid.x - W / 2;
-      const ry = mid.y - H / 2;
+      const s = resist((g.zoom0 * dist) / g.dist0);
+      // The picture point that was under the fingers when the pinch began stays under them as
+      // they spread and move (so two fingers can also drag the picture around).
+      const ax = g.mid0.x - W / 2 - g.pan0.x;
+      const ay = g.mid0.y - H / 2 - g.pan0.y;
       zoom.set(s);
-      panX.set(rx - (rx - g.pan0.x) * (s / g.zoom0));
-      panY.set(ry - (ry - g.pan0.y) * (s / g.zoom0));
+      panX.set(mid.x - W / 2 - ax * (s / g.zoom0));
+      panY.set(mid.y - H / 2 - ay * (s / g.zoom0));
+      g.focal = mid;
       return;
     }
     const dx = e.clientX - g.x0;
@@ -570,6 +687,7 @@ export default function MediaViewer({
         Math.abs(v) <= max ? v : Math.sign(v) * (max + (Math.abs(v) - max) * 0.3);
       panX.set(rubber(g.pan0.x + dx, b.x));
       panY.set(rubber(g.pan0.y + dy, b.y));
+      g.focal = { x: e.clientX, y: e.clientY };
     }
   }
 
@@ -601,9 +719,7 @@ export default function MediaViewer({
         return;
       }
       g.kind = 'none';
-      if (zoom.get() <= 1.01) zoomTo(1, W / 2, H / 2);
-      else if (zoom.get() > ZOOM_MAX) zoomTo(ZOOM_MAX, W / 2, H / 2);
-      else settlePan();
+      settle(g.focal);
       return;
     }
     const dx = e.clientX - g.x0;
@@ -623,7 +739,8 @@ export default function MediaViewer({
         wake();
       }
     } else if (kind === 'pan') {
-      settlePan();
+      // Also the end of a pinch whose fingers came off one after the other.
+      settle(g.focal, vx, vy);
     } else if (kind === 'pending' && e.type === 'pointerup') {
       tap(e.clientX, e.clientY, e.timeStamp);
     }
@@ -635,7 +752,7 @@ export default function MediaViewer({
       clearTimeout(singleTap.current);
       lastTap.current = null;
       if (item.kind === 'VIDEO') return;
-      zoomTo(zoom.get() > 1.01 ? 1 : ZOOM_TOGGLE, x, y);
+      zoomTo(zoom.get() > 1.01 ? 1 : fillZoom(), x, y);
       return;
     }
     lastTap.current = { t, x, y };
@@ -663,8 +780,16 @@ export default function MediaViewer({
     detachWheel.current = null;
     if (!el) return;
     const listener = (e: WheelEvent) => onWheel.current(e);
+    // iOS Safari also runs its own page pinch-zoom (gesture* events) unless told not to.
+    const noPageZoom = (e: Event) => e.preventDefault();
     el.addEventListener('wheel', listener, { passive: false });
-    detachWheel.current = () => el.removeEventListener('wheel', listener);
+    el.addEventListener('gesturestart', noPageZoom);
+    el.addEventListener('gesturechange', noPageZoom);
+    detachWheel.current = () => {
+      el.removeEventListener('wheel', listener);
+      el.removeEventListener('gesturestart', noPageZoom);
+      el.removeEventListener('gesturechange', noPageZoom);
+    };
   }, []);
 
   // ---- download / share ----
@@ -723,9 +848,10 @@ export default function MediaViewer({
           </RadixDialog.Title>
 
           {/* The stage: every gesture lands here. */}
-          <div
+          <motion.div
             ref={stage}
             data-viewer-stage
+            style={{ clipPath }}
             className="absolute inset-0 touch-none"
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
@@ -757,6 +883,7 @@ export default function MediaViewer({
                           borderRadius: boxRadius,
                         }}
                         zoomStyle={{ scale: zoom, x: panX, y: panY }}
+                        zoomed={zoomed}
                       />
                     </motion.div>
                   </motion.div>
@@ -777,7 +904,7 @@ export default function MediaViewer({
                 ),
               )}
             </motion.div>
-          </div>
+          </motion.div>
 
           {/* Chrome */}
           <motion.div
@@ -793,7 +920,12 @@ export default function MediaViewer({
                 chrome && 'pointer-events-auto',
               )}
             >
-              <Avatar name={entry.senderName} color={entry.senderColor} size="sm" />
+              <Avatar
+                name={entry.senderName}
+                color={entry.senderColor}
+                avatar={entry.senderAvatar}
+                size="sm"
+              />
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold">{entry.senderName}</p>
                 <p className="truncate text-xs text-white/70">

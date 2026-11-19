@@ -1,4 +1,6 @@
 import { useQuery } from '@apollo/client';
+import { Suspense } from 'react';
+import { useLocation } from 'react-router';
 import { MotionConfig, motion } from 'motion/react';
 import { Toaster } from 'sonner';
 import { Button } from '@/components/Button';
@@ -8,6 +10,9 @@ import { easeOut } from '@/lib/motion';
 import { useThemePreference } from '@/lib/theme';
 import { AppShell } from './features/AppShell';
 import { AuthPage } from './features/auth/AuthPage';
+import { CardDialogProvider } from './features/card/CardDialogProvider';
+import { matchCardPath } from './features/card/CardRoute';
+import { PublicCardPage } from './features/card/lazy';
 import { EventsProvider } from './features/realtime/EventsProvider';
 import { ViewerProvider } from './features/session/ViewerProvider';
 
@@ -38,6 +43,8 @@ function Splash() {
 export default function App() {
   const { data, loading, error, refetch } = useQuery(ME);
   const [theme] = useThemePreference();
+  const { pathname } = useLocation();
+  const cardName = matchCardPath(pathname);
 
   let key: string;
   let screen: React.ReactNode;
@@ -58,6 +65,14 @@ export default function App() {
         </Button>
       </div>
     );
+  } else if (!data?.me && cardName) {
+    // Someone's card link, opened by a visitor who isn't signed in.
+    key = `card:${cardName}`;
+    screen = (
+      <Suspense fallback={<Splash />}>
+        <PublicCardPage username={cardName} />
+      </Suspense>
+    );
   } else if (!data?.me) {
     key = 'auth';
     screen = <AuthPage />;
@@ -66,7 +81,9 @@ export default function App() {
     screen = (
       <ViewerProvider viewer={data.me}>
         <EventsProvider>
-          <AppShell />
+          <CardDialogProvider>
+            <AppShell />
+          </CardDialogProvider>
         </EventsProvider>
       </ViewerProvider>
     );

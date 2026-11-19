@@ -1,4 +1,5 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import cookie from '@fastify/cookie';
@@ -17,6 +18,7 @@ import { prisma } from './db.js';
 import { deny, sameOrigin } from './origin.js';
 import { closeAllRelays, closeRelaysOf, handleRelayUpgrade, setRelayLogger } from './relay.js';
 import { schema } from './schema.js';
+import { getCard } from './services/cards.js';
 import { getPeer, PEER_ID, registerPeer, unregisterPeer } from './services/peers.js';
 import { userConnected, userDisconnected } from './services/presence.js';
 
@@ -190,9 +192,24 @@ export async function buildApp() {
         );
       },
     });
-    app.get('/*', (req, reply) => {
+    let indexHtml: string | null = null;
+    app.get('/*', async (req, reply) => {
       const accepts = String(req.headers.accept ?? '');
       if (accepts.includes('text/html') || accepts.includes('*/*') || accepts === '') {
+        // A shared card's link gets a title and description for link previews in other apps.
+        const handle = /^\/@([a-z0-9_]{3,20})\/?$/i.exec(req.url.split('?')[0]!)?.[1];
+        if (handle) {
+          const card = await getCard(null, handle).catch(() => null);
+          if (card) {
+            indexHtml ??= readFileSync(join(config.webDist, 'index.html'), 'utf8');
+            return reply
+              .header('Cache-Control', 'no-cache')
+              .type('text/html; charset=utf-8')
+              .send(
+                withCardMeta(indexHtml, card.user.displayName, card.user.username, card.recipe),
+              );
+          }
+        }
         return reply.header('Cache-Control', 'no-cache').sendFile('index.html');
       }
       return reply.status(404).send({ error: 'Not found' });
@@ -200,4 +217,33 @@ export async function buildApp() {
   }
 
   return app;
+}
+
+const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+/** index.html with `<title>` and `og:` tags for someone's shared card. */
+export function withCardMeta(
+  html: string,
+  displayName: string,
+  username: string,
+  recipe: string | null,
+) {
+  let about = '';
+  try {
+    const parsed = recipe ? (JSON.parse(recipe) as { about?: unknown }) : null;
+    if (typeof parsed?.about === 'string') about = parsed.about.split('\n')[0]!;
+  } catch {
+    /* no about */
+  }
+  const title = escapeHtml(`${displayName} (@${username}) on Realtime`);
+  const description = escapeHtml(about || `Say hi to ${displayName} on Realtime.`);
+  const tags = [
+    `<meta property="og:title" content="${title}">`,
+    `<meta property="og:description" content="${description}">`,
+    `<meta property="og:type" content="profile">`,
+    `<meta name="description" content="${description}">`,
+  ].join('');
+  return html
+    .replace(/<title>[^<]*<\/title>/, `<title>${title}</title>`)
+    .replace('</head>', `${tags}</head>`);
 }

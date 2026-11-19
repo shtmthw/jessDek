@@ -24,6 +24,7 @@ import { exit, spring } from '@/lib/motion';
 import { formatListTime } from '@/lib/time';
 import { useTypingNames } from '../realtime/typing';
 import { useViewer } from '../session/ViewerProvider';
+import { reactionPreviewText } from '@/lib/reactionText';
 
 /** "Photo", "3 photos", "Video"… with a small icon, then the caption if there is one. */
 function MediaPreview({
@@ -49,6 +50,9 @@ function MediaPreview({
 }
 
 function preview(c: Conversation, viewerId: string): React.ReactNode {
+  // A reaction by you or on your message, newer than the last message, takes the line (quietly).
+  const reacted = reactionPreviewText(c.lastReaction, c.lastMessage, viewerId);
+  if (reacted) return reacted;
   const m = c.lastMessage;
   if (!m) return c.type === 'GROUP' ? 'Group created' : 'Say hello 👋';
   const who =
@@ -145,6 +149,7 @@ export function ConversationRow({ conversation: c }: { conversation: Conversatio
       <Avatar
         name={c.title}
         color={c.peer?.avatarColor}
+        avatar={c.peer?.avatar}
         online={c.peer?.online}
         group={c.type === 'GROUP'}
         className="relative"

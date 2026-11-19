@@ -2,7 +2,7 @@ import { useMutation } from '@apollo/client';
 import { Eye, EyeOff } from 'lucide-react';
 import { AnimatePresence, motion, useAnimate } from 'motion/react';
 import { useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 import { Button } from '@/components/Button';
 import { Field, Input } from '@/components/Input';
 import { Logo } from '@/components/Logo';
@@ -37,7 +37,9 @@ const enter = {
 
 export function AuthPage() {
   const navigate = useNavigate();
-  const [mode, setMode] = useState<Mode>('signin');
+  // A shared card's "Create an account" arrives here asking for the sign-up form.
+  const { state } = useLocation() as { state: { auth?: Mode } | null };
+  const [mode, setMode] = useState<Mode>(state?.auth === 'signup' ? 'signup' : 'signin');
   const [values, setValues] = useState({ identifier: '', username: '', email: '', password: '' });
   const [errors, setErrors] = useState<Errors>({});
   const [formError, setFormError] = useState<string | null>(null);

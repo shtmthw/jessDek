@@ -1,27 +1,40 @@
 import { AlertCircle, ArrowDown, Check, Loader2, RotateCcw, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
+import { toast } from 'sonner';
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
 } from 'react';
 import { Avatar } from '@/components/Avatar';
 import { useSharingSummary } from '@/features/media/transfers';
 import { cn } from '@/lib/cn';
+import type { Reaction, User } from '@/lib/gql';
 import { prefersReducedMotion } from '@/lib/media';
 import { buildTimeline, type ChatMessage, type TimelineItem } from '@/lib/messages';
 import { exit, spring } from '@/lib/motion';
 import { formatClock } from '@/lib/time';
 import type { Typer } from '../realtime/typing';
+import { MessageMenu, type MenuRequest } from './actions/MessageMenu';
+import { MessageToolbar, SwipeReplyHint } from './actions/MessageToolbar';
+import { useBubbleGestures } from './actions/useBubbleGestures';
 import { bubbleCorners } from './bubbleStyle';
 import { Linkify } from './Linkify';
 import { MediaBubble } from './media/MediaBubble';
 import { ScrollRootContext } from './media/ScrollRoot';
+import { EmojiPickerDialog } from './reactions/EmojiPickerDialog';
+import { ReactionChips } from './reactions/ReactionChips';
+import { myReaction } from './reactions/reactions';
+import { ReactionsDialog } from './reactions/ReactionsDialog';
+import { ReplyQuote } from './replies/ReplyQuote';
 import { TypingBubble } from './TypingBubble';
+import { useOpenCard } from '../card/CardDialogProvider';
 
 /** A message as shown on screen. `id` is a stable key: a sent message keeps the key it had while pending. */
 export interface DisplayMessage extends ChatMessage {
@@ -29,7 +42,13 @@ export interface DisplayMessage extends ChatMessage {
   tempId?: string;
   /** Your own photos and videos are still being resized and hashed before they can be sent. */
   preparing?: boolean;
+  /** The server's id, when `id` is the key it was shown under while sending. */
+  serverId?: string;
 }
+
+/** The id to reply to or react to: confirmed messages only (null while sending or failed). */
+export const serverIdOf = (m: DisplayMessage): string | null =>
+  m.status === 'sending' || m.status === 'failed' ? null : (m.serverId ?? m.id);
 
 type Run = Extract<TimelineItem<DisplayMessage>, { kind: 'run' }>;
 
@@ -44,6 +63,8 @@ function Bubble({
   first,
   last,
   status,
+  quote,
+  flash,
   onClick,
 }: {
   text: string;
@@ -51,14 +72,22 @@ function Bubble({
   first: boolean;
   last: boolean;
   status?: DisplayMessage['status'];
+  /** The quoted message, when this is a reply. */
+  quote?: ReactNode;
+  flash?: boolean;
   onClick: (e: MouseEvent<HTMLDivElement>) => void;
 }) {
   return (
     <div
+      data-bubble
       onClick={onClick}
       className={cn(
-        'w-fit max-w-[min(80%,clamp(34rem,45%,48rem))] whitespace-pre-wrap break-words px-3.5 py-2 text-[15px] leading-[1.42] md:px-4',
+        'w-fit max-w-full whitespace-pre-wrap break-words px-3.5 py-2 text-[15px] leading-[1.42] md:px-4',
         'transition-[border-radius,opacity,background-color] duration-300 ease-out-quint',
+        // On touch screens a long-press opens the message's actions (Copy text among them).
+        'pointer-coarse:select-none pointer-coarse:[-webkit-touch-callout:none]',
+        quote && 'pt-1.5 md:pt-1.5',
+        flash && 'message-flash',
         mine ? 'bg-brand text-brand-foreground' : 'bg-bubble text-foreground',
         bubbleCorners(mine, first, last),
         status === 'sending' && 'opacity-70',
@@ -68,6 +97,7 @@ function Bubble({
           : '[&_a]:text-brand-text [&_a]:decoration-current/40',
       )}
     >
+      {quote ? <div className="-mx-2 mb-1 md:-mx-2.5">{quote}</div> : null}
       <Linkify text={text} />
     </div>
   );
@@ -201,6 +231,17 @@ function sharingLabel(
   return `Sharing with ${sharing.peers.length} people`;
 }
 
+/** What a row can do with its message, shared by every row of the list. */
+interface RowActions {
+  /** Reacting and replying are allowed in this chat (not, say, a blocked direct chat). */
+  canAct: boolean;
+  viewerId: string;
+  onMenu: (message: DisplayMessage, request: MenuRequest) => void;
+  onReply: (message: DisplayMessage) => void;
+  onOpenReactions: (message: DisplayMessage) => void;
+  onJump: (messageId: string) => void;
+}
+
 function MessageRow({
   message,
   mine,
@@ -214,6 +255,10 @@ function MessageRow({
   onOpenMedia,
   onRetry,
   onDiscard,
+  actions,
+  flash,
+  tabbable,
+  menuOpen,
 }: {
   message: DisplayMessage;
   mine: boolean;
@@ -227,12 +272,32 @@ function MessageRow({
   onOpenMedia: (messageId: string, index: number) => void;
   onRetry: (tempId: string) => void;
   onDiscard: (tempId: string) => void;
+  actions: RowActions;
+  /** Ring the bubble briefly: a quote just jumped here. */
+  flash: boolean;
+  /** This message is the list's one Tab stop (arrow keys move it). */
+  tabbable: boolean;
+  /** Its actions menu is open (keeps the toolbar up). */
+  menuOpen: boolean;
 }) {
   const [reveal, setReveal] = useState(false);
   const media = message.attachments?.length ? message.attachments : null;
   const sharing = useSharingSummary(
     mine && media ? media.flatMap((m) => [m.sha256, m.posterSha256 ?? undefined]) : [],
   );
+  const wrap = useRef<HTMLDivElement>(null);
+  const serverId = serverIdOf(message);
+  const actionable = actions.canAct && serverId !== null;
+  const bubbleEl = () => wrap.current?.querySelector<HTMLElement>('[data-bubble]') ?? wrap.current!;
+  const openMenu = (mode: MenuRequest['mode'], returnFocus: HTMLElement | null) =>
+    actions.onMenu(message, { bubble: bubbleEl(), mode, touch: false, returnFocus });
+
+  const gestures = useBubbleGestures({
+    enabled: actionable,
+    onLongPress: (bubble) =>
+      actions.onMenu(message, { bubble, mode: 'full', touch: true, returnFocus: null }),
+    onSwipe: () => actions.onReply(message),
+  });
 
   // Tap (or click) a bubble to pin its time; links and text selection keep working as usual.
   function toggle(e: MouseEvent<HTMLElement>) {
@@ -240,6 +305,17 @@ function MessageRow({
     if (window.getSelection()?.toString()) return;
     setReveal((r) => !r);
   }
+
+  const replyTo = message.replyTo;
+  const quote = replyTo ? (
+    <ReplyQuote
+      quote={replyTo}
+      viewerId={actions.viewerId}
+      mine={mine}
+      onJump={() => actions.onJump(replyTo.id)}
+    />
+  ) : null;
+  const sender = mine ? 'You' : message.sender.displayName;
 
   return (
     <div className={cn('flex w-full flex-col', mine ? 'items-end' : 'items-start')}>
@@ -253,30 +329,74 @@ function MessageRow({
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={mine ? spring.send : spring.soft}
       >
-        {media ? (
-          <MediaBubble
-            items={media}
-            caption={message.body}
-            mine={mine}
-            first={first}
-            last={last}
-            failed={message.status === 'failed'}
-            conversationId={conversationId}
-            who={{ dm: !isGroup, mine, firstName: message.sender.displayName.split(' ')[0] ?? '' }}
-            senderName={message.sender.displayName}
-            onToggleTime={toggle}
-            onOpen={(index) => onOpenMedia(message.id, index)}
-          />
-        ) : (
-          <Bubble
-            text={message.body}
-            mine={mine}
-            first={first}
-            last={last}
-            status={message.status}
-            onClick={toggle}
-          />
-        )}
+        <div
+          ref={wrap}
+          data-message-key={message.id}
+          data-message-id={serverId ?? undefined}
+          tabIndex={tabbable ? 0 : -1}
+          aria-label={`${sender}, ${formatClock(message.createdAt)}`}
+          aria-keyshortcuts={actionable ? 'Enter R' : undefined}
+          className={cn(
+            'relative min-w-0 rounded-[20px] outline-offset-2',
+            media ? 'max-w-full' : 'max-w-[min(80%,clamp(34rem,45%,48rem))]',
+          )}
+        >
+          {actionable ? <SwipeReplyHint x={gestures.x} /> : null}
+          <motion.div
+            className={cn(
+              'relative flex flex-col',
+              mine ? 'items-end' : 'items-start',
+              actionable && 'touch-pan-y',
+            )}
+            style={{ x: gestures.x, scale: gestures.press }}
+            {...(actionable ? gestures.handlers : {})}
+            onContextMenu={(e: MouseEvent<HTMLElement>) => {
+              if (!actionable) return;
+              e.preventDefault(); // our menu instead of the browser's
+              if (gestures.wasTouch()) return; // a held finger already opened it
+              openMenu('full', document.activeElement as HTMLElement | null);
+            }}
+          >
+            {media ? (
+              <MediaBubble
+                items={media}
+                caption={message.body}
+                mine={mine}
+                first={first}
+                last={last}
+                failed={message.status === 'failed'}
+                conversationId={conversationId}
+                who={{
+                  dm: !isGroup,
+                  mine,
+                  firstName: message.sender.displayName.split(' ')[0] ?? '',
+                }}
+                senderName={message.sender.displayName}
+                onToggleTime={toggle}
+                onOpen={(index) => onOpenMedia(message.id, index)}
+                quote={quote}
+                flash={flash}
+              />
+            ) : (
+              <Bubble
+                text={message.body}
+                mine={mine}
+                first={first}
+                last={last}
+                status={message.status}
+                quote={quote}
+                flash={flash}
+                onClick={toggle}
+              />
+            )}
+            <ReactionChips
+              reactions={message.reactions}
+              viewerId={actions.viewerId}
+              mine={mine}
+              onOpen={() => actions.onOpenReactions(message)}
+            />
+          </motion.div>
+        </div>
         {message.status === 'failed' ? (
           <AlertCircle className="size-4 shrink-0 text-danger" aria-hidden />
         ) : (
@@ -284,12 +404,20 @@ function MessageRow({
             dateTime={message.createdAt}
             className={cn(
               'tabular shrink-0 select-none text-[11px] text-muted-foreground transition-opacity duration-200',
-              reveal ? 'opacity-100' : 'opacity-0 group-hover/msg:opacity-100',
+              reveal || menuOpen ? 'opacity-100' : 'opacity-0 group-hover/msg:opacity-100',
             )}
           >
             {formatClock(message.createdAt)}
           </time>
         )}
+        {actionable ? (
+          <MessageToolbar
+            active={menuOpen}
+            onReact={(button) => openMenu('react', button)}
+            onReply={() => actions.onReply(message)}
+            onMore={(button) => openMenu('full', button)}
+          />
+        ) : null}
       </motion.div>
       <StatusLine
         message={message}
@@ -338,6 +466,12 @@ export function MessageList({
   firstUnreadId,
   intro,
   empty,
+  canAct,
+  members,
+  onReply,
+  onReact,
+  onJump,
+  jump,
 }: {
   messages: DisplayMessage[];
   viewerId: string;
@@ -359,6 +493,18 @@ export function MessageList({
   intro?: ReactNode;
   /** Shown instead of the list when there are no messages yet. */
   empty?: ReactNode;
+  /** Reacting and replying are allowed (false in a blocked direct chat). */
+  canAct: boolean;
+  /** The chat's members, for avatars in "Reactions". */
+  members: readonly User[];
+  /** Reply to a confirmed message (by its server id). */
+  onReply: (messageId: string) => void;
+  /** Set (or with null remove) your reaction; picking your current emoji again removes it. */
+  onReact: (message: { id: string; reactions?: readonly Reaction[] }, emoji: string | null) => void;
+  /** A quote was tapped: bring its message into view (loading history if need be). */
+  onJump: (messageId: string) => void;
+  /** Scroll to this message and ring it (set after `onJump` found it). `nonce` repeats a jump. */
+  jump?: { id: string; nonce: number } | null;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const topSentinel = useRef<HTMLDivElement>(null);
@@ -368,8 +514,101 @@ export function MessageList({
   const prepend = useRef<{ height: number; firstId: string | undefined } | null>(null);
   const [unseen, setUnseen] = useState(0);
   const [far, setFar] = useState(false);
+  const [menu, setMenu] = useState<{ key: string; request: MenuRequest } | null>(null);
+  const [pickerFor, setPickerFor] = useState<string | null>(null);
+  const [reactionsFor, setReactionsFor] = useState<string | null>(null);
+  const [focusKey, setFocusKey] = useState<string | null>(null);
+  const [flashId, setFlashId] = useState<string | null>(null);
+  const byKey = (key: string | null) => (key ? messages.find((m) => m.id === key) : undefined);
+  const closeMenu = useCallback(() => setMenu(null), []);
+
+  const rowActions: RowActions = {
+    canAct,
+    viewerId,
+    onMenu: (message, request) => setMenu({ key: message.id, request }),
+    onReply: (message) => {
+      const id = serverIdOf(message);
+      if (id) onReply(id);
+    },
+    onOpenReactions: (message) => setReactionsFor(message.id),
+    onJump,
+  };
+
+  /** React to a message on screen by its display key. */
+  function reactTo(key: string, emoji: string | null) {
+    const m = byKey(key);
+    const id = m ? serverIdOf(m) : null;
+    if (m && id) onReact({ id, reactions: m.reactions }, emoji);
+  }
+
+  function copyText(key: string) {
+    const body = byKey(key)?.body;
+    if (!body) return;
+    navigator.clipboard?.writeText(body).then(
+      () => toast.success('Copied'),
+      () => toast.error('Couldn’t copy'),
+    );
+  }
+
+  // Bring the message a quote points at into view, then ring it. If older history is still on its
+  // way in, wait for it: each new render of the list tries again until the message is there.
+  const handledJump = useRef(0);
+  useLayoutEffect(() => {
+    const root = scroller.current;
+    if (!jump || !root || handledJump.current === jump.nonce) return;
+    const el = root.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(jump.id)}"]`);
+    if (!el) return;
+    handledJump.current = jump.nonce;
+    const box = root.getBoundingClientRect();
+    const at = el.getBoundingClientRect();
+    const top = root.scrollTop + at.top - box.top - (box.height - at.height) / 2;
+    stick.current = false;
+    root.scrollTo({ top: Math.max(0, top), behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+    setFlashId(null);
+    requestAnimationFrame(() => setFlashId(jump.id)); // restart the ring on a repeat jump
+    setFocusKey(el.dataset.messageKey ?? null);
+  }, [jump, messages]);
+  useEffect(() => {
+    if (!flashId) return;
+    const t = setTimeout(() => setFlashId(null), 1700);
+    return () => clearTimeout(t);
+  }, [flashId]);
+
+  /** Arrow keys walk the messages; Enter opens one's actions, R replies to it. */
+  function onLogKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-message-key]');
+    if (!el || e.target !== el || e.altKey || e.ctrlKey || e.metaKey) return;
+    const all = [...(scroller.current?.querySelectorAll<HTMLElement>('[data-message-key]') ?? [])];
+    const i = all.indexOf(el);
+    const go = (target: HTMLElement | undefined) => {
+      if (!target) return;
+      target.focus({ preventScroll: true });
+      target.scrollIntoView({ block: 'nearest' });
+    };
+    const key = el.dataset.messageKey!;
+    const m = byKey(key);
+    const actionable = Boolean(canAct && m && serverIdOf(m));
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      go(all[i + (e.key === 'ArrowDown' ? 1 : -1)]);
+    } else if (e.key === 'Home' || e.key === 'End') {
+      e.preventDefault();
+      go(e.key === 'Home' ? all[0] : all[all.length - 1]);
+    } else if (
+      actionable &&
+      (e.key === 'Enter' || e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10'))
+    ) {
+      e.preventDefault();
+      const bubble = el.querySelector<HTMLElement>('[data-bubble]') ?? el;
+      setMenu({ key, request: { bubble, mode: 'full', touch: false, returnFocus: el } });
+    } else if (actionable && !e.shiftKey && (e.key === 'r' || e.key === 'R')) {
+      e.preventDefault(); // not the composer's "type anywhere"
+      rowActions.onReply(m!);
+    }
+  }
 
   // Only messages that arrive while the chat is open get an entrance; history just appears.
+  const openCard = useOpenCard();
   const known = useRef<Set<string> | null>(null);
   const newestKnown = useRef(0);
   if (known.current === null) {
@@ -400,6 +639,8 @@ export function MessageList({
     return out;
   }, [timeline]);
   const lastMessage = messages[messages.length - 1];
+  // One Tab stop in the list: the message you last focused, or the newest.
+  const tabKey = byKey(focusKey) ? focusKey : (lastMessage?.id ?? null);
 
   const scrollToBottom = (smooth: boolean) => {
     const el = scroller.current;
@@ -482,9 +723,47 @@ export function MessageList({
     return () => observer.disconnect();
   }, [hasMore, loadingMore, onLoadMore, messages]);
 
+  // A day label that has floated up to stay pinned over other days' messages shows while you
+  // scroll and fades once you stop, so it doesn't sit on top of a message (index.css).
+  const scrollIdle = useRef<number | undefined>(undefined);
+  const lastInput = useRef(0);
+  const markInput = () => {
+    lastInput.current = Date.now();
+  };
+  const markPinnedDays = useCallback(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const top = el.getBoundingClientRect().top;
+    el.querySelectorAll<HTMLElement>('[data-day-pill]').forEach((pill) => {
+      const section = pill.parentElement!.getBoundingClientRect();
+      const pinned = section.top < top - 1 && section.bottom > top;
+      if (pinned === pill.hasAttribute('data-pinned')) return;
+      // Pinned by the app's own scrolling (a chat opening at its newest message): hide at once
+      // rather than fading out over the top message.
+      const instant = !el.hasAttribute('data-scrolling');
+      if (instant) pill.style.transition = 'none';
+      pill.toggleAttribute('data-pinned', pinned);
+      if (instant) {
+        void pill.offsetHeight; // apply the change before the transition comes back
+        pill.style.transition = '';
+      }
+    });
+  }, []);
+  useLayoutEffect(markPinnedDays, [markPinnedDays, messages]);
+  useEffect(() => () => window.clearTimeout(scrollIdle.current), []);
+
   function onScroll() {
     const el = scroller.current;
     if (!el) return;
+    markPinnedDays();
+    // Only your own scrolling shows the pinned day label (and its momentum keeps it shown), not
+    // the app jumping to the newest message when a chat opens or a message arrives.
+    const byYou = Date.now() - lastInput.current < 1500 || el.hasAttribute('data-scrolling');
+    if (byYou) {
+      el.setAttribute('data-scrolling', '');
+      window.clearTimeout(scrollIdle.current);
+      scrollIdle.current = window.setTimeout(() => el.removeAttribute('data-scrolling'), 1100);
+    }
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
     stick.current = distance < NEAR_BOTTOM_PX;
     if (stick.current) setUnseen(0);
@@ -499,12 +778,27 @@ export function MessageList({
         className={cn('mt-3 flex items-end gap-2 first:mt-0', run.mine && 'justify-end')}
       >
         {others ? (
-          <Avatar
-            name={run.sender.displayName}
-            color={run.sender.avatarColor}
-            size="sm"
-            className="mb-px"
-          />
+          <button
+            type="button"
+            onClick={() =>
+              run.sender.username &&
+              openCard({
+                ...run.sender,
+                username: run.sender.username,
+                avatar: run.sender.avatar ?? null,
+              })
+            }
+            aria-label={`${run.sender.displayName}'s card`}
+            title={`${run.sender.displayName}'s card`}
+            className="mb-px shrink-0 rounded-full transition-transform motion-safe:active:scale-90"
+          >
+            <Avatar
+              name={run.sender.displayName}
+              color={run.sender.avatarColor}
+              avatar={run.sender.avatar}
+              size="sm"
+            />
+          </button>
         ) : null}
         <div
           className={cn(
@@ -532,6 +826,10 @@ export function MessageList({
               onOpenMedia={onOpenMedia}
               onRetry={onRetry}
               onDiscard={onDiscard}
+              actions={rowActions}
+              flash={flashId !== null && (m.serverId ?? m.id) === flashId}
+              tabbable={m.id === tabKey}
+              menuOpen={menu?.key === m.id}
             />
           ))}
         </div>
@@ -545,6 +843,18 @@ export function MessageList({
         <div
           ref={scroller}
           onScroll={onScroll}
+          onWheel={markInput}
+          onTouchStart={markInput}
+          onTouchMove={markInput}
+          onPointerDown={markInput}
+          onKeyDown={(e) => {
+            markInput();
+            onLogKeyDown(e);
+          }}
+          onFocus={(e) => {
+            const key = (e.target as HTMLElement).dataset?.messageKey;
+            if (key) setFocusKey(key);
+          }}
           className="h-full overflow-y-auto overscroll-contain"
           role="log"
           aria-live="polite"
@@ -564,7 +874,10 @@ export function MessageList({
 
             {sections.map((section) => (
               <div key={section.key} role="group" aria-label={section.label}>
-                <div className="pointer-events-none sticky top-0 z-10 flex justify-center py-2.5">
+                <div
+                  data-day-pill
+                  className="pointer-events-none sticky top-0 z-10 flex justify-center py-2.5"
+                >
                   <span className="rounded-full bg-background/85 px-3 py-1 text-xs font-medium text-muted-foreground shadow-sm ring-1 ring-border backdrop-blur-md">
                     {section.label}
                   </span>
@@ -619,6 +932,51 @@ export function MessageList({
           ) : null}
         </AnimatePresence>
       </div>
+
+      <AnimatePresence>
+        {menu && byKey(menu.key) ? (
+          <MessageMenu
+            key={menu.key}
+            request={menu.request}
+            mine={byKey(menu.key)!.sender.id === viewerId}
+            current={myReaction(byKey(menu.key)!.reactions, viewerId)}
+            canCopy={Boolean(byKey(menu.key)!.body.trim())}
+            onClose={closeMenu}
+            onReact={(emoji) => {
+              reactTo(menu.key, emoji);
+              closeMenu();
+            }}
+            onMore={() => {
+              setPickerFor(menu.key);
+              closeMenu();
+            }}
+            onReply={() => {
+              rowActions.onReply(byKey(menu.key)!);
+              closeMenu();
+            }}
+            onCopy={() => {
+              copyText(menu.key);
+              closeMenu();
+            }}
+          />
+        ) : null}
+      </AnimatePresence>
+
+      <EmojiPickerDialog
+        open={pickerFor !== null && Boolean(byKey(pickerFor))}
+        onOpenChange={(open) => !open && setPickerFor(null)}
+        current={myReaction(byKey(pickerFor)?.reactions, viewerId)}
+        onPick={(emoji) => pickerFor && reactTo(pickerFor, emoji)}
+      />
+
+      <ReactionsDialog
+        open={reactionsFor !== null && (byKey(reactionsFor)?.reactions?.length ?? 0) > 0}
+        onOpenChange={(open) => !open && setReactionsFor(null)}
+        reactions={byKey(reactionsFor)?.reactions ?? []}
+        viewerId={viewerId}
+        members={members}
+        onRemoveMine={() => reactionsFor && reactTo(reactionsFor, null)}
+      />
     </ScrollRootContext.Provider>
   );
 }

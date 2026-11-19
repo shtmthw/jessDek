@@ -54,12 +54,22 @@ import { ConnectionBanner } from './ConnectionBanner';
 import { ConversationList, sortConversations } from './conversations/ConversationList';
 import { NewChatDialog } from './conversations/NewChatDialog';
 import { useViewer } from './session/ViewerProvider';
-import { SettingsPage } from './settings/SettingsPage';
+import { matchCardPath, usePendingChat } from './card/CardRoute';
+import {
+  AvatarStudio,
+  CardStudio,
+  prefetchScreens,
+  SettingsPage,
+  SignedInCardPage,
+} from './card/lazy';
 
 const SWIPE_EDGE_PX = 28;
 
-// A visual-QA page for every photo and video state. Dev builds only; production drops it.
+// Visual-QA pages for every photo and video state and every avatar item. Dev builds only; production drops them.
 const DevMedia = import.meta.env.DEV ? lazy(() => import('./chat/media/DevGallery')) : null;
+const DevAvatars = import.meta.env.DEV ? lazy(() => import('./avatar/DevAvatars')) : null;
+const DevCards = import.meta.env.DEV ? lazy(() => import('./card/DevCards')) : null;
+const DevSpecials = import.meta.env.DEV ? lazy(() => import('./avatar/DevSpecials')) : null;
 
 function EmptyState({ onNewChat }: { onNewChat: () => void }) {
   const shortcuts: Array<[ReactNode, string]> = [
@@ -110,22 +120,58 @@ function EmptyState({ onNewChat }: { onNewChat: () => void }) {
 
 function PaneRoutes({ location, onNewChat }: { location?: Location; onNewChat: () => void }) {
   return (
-    <Routes location={location}>
-      <Route path="/" element={<EmptyState onNewChat={onNewChat} />} />
-      <Route path="/c/:id" element={<ChatView />} />
-      <Route path="/settings" element={<SettingsPage />} />
-      {DevMedia ? (
-        <Route
-          path="/dev/media"
-          element={
-            <Suspense fallback={null}>
-              <DevMedia />
-            </Suspense>
-          }
-        />
-      ) : null}
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    // Settings, the studios and card pages load on demand (prefetched when idle; see card/lazy).
+    <Suspense fallback={<div className="h-full bg-background" aria-busy />}>
+      <Routes location={location}>
+        <Route path="/" element={<EmptyState onNewChat={onNewChat} />} />
+        <Route path="/c/:id" element={<ChatView />} />
+        <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/settings/avatar" element={<AvatarStudio />} />
+        <Route path="/settings/card" element={<CardStudio />} />
+        <Route path="/:handle" element={<SignedInCardPage />} />
+        {DevMedia ? (
+          <Route
+            path="/dev/media"
+            element={
+              <Suspense fallback={null}>
+                <DevMedia />
+              </Suspense>
+            }
+          />
+        ) : null}
+        {DevAvatars ? (
+          <Route
+            path="/dev/avatars"
+            element={
+              <Suspense fallback={null}>
+                <DevAvatars />
+              </Suspense>
+            }
+          />
+        ) : null}
+        {DevSpecials ? (
+          <Route
+            path="/dev/specials"
+            element={
+              <Suspense fallback={null}>
+                <DevSpecials />
+              </Suspense>
+            }
+          />
+        ) : null}
+        {DevCards ? (
+          <Route
+            path="/dev/cards"
+            element={
+              <Suspense fallback={null}>
+                <DevCards />
+              </Suspense>
+            }
+          />
+        ) : null}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Suspense>
   );
 }
 
@@ -198,10 +244,16 @@ export function AppShell() {
   const chatMatch = matchPath('/c/:id', location.pathname);
   const inPane = Boolean(
     chatMatch ||
-    matchPath('/settings', location.pathname) ||
-    (import.meta.env.DEV && matchPath('/dev/media', location.pathname)),
+    matchPath('/settings/*', location.pathname) ||
+    matchCardPath(location.pathname) ||
+    (import.meta.env.DEV && matchPath('/dev/*', location.pathname)),
   );
   const openNewChat = () => setNewChatOpen(true);
+  usePendingChat();
+  useEffect(prefetchScreens, []);
+  // Going somewhere else (e.g. Message on someone's card opened from New chat) closes New chat,
+  // so it doesn't sit on top of the chat that just opened.
+  useEffect(() => setNewChatOpen(false), [location.pathname]);
 
   // Phone layout: one motion value drives the pane and the list's parallax underneath it.
   const reduced = useReducedMotion() ?? false;
@@ -329,7 +381,7 @@ export function AppShell() {
             )
           }
         >
-          <Avatar name={viewer.displayName} color={viewer.avatarColor} />
+          <Avatar name={viewer.displayName} color={viewer.avatarColor} avatar={viewer.avatar} />
           <span className="min-w-0 flex-1">
             <span className="block truncate text-sm font-semibold">{viewer.displayName}</span>
             <span className="block truncate text-xs text-muted-foreground">@{viewer.username}</span>

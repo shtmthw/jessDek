@@ -14,7 +14,8 @@ describe('TypingBubble', () => {
   it('shows the typer’s profile picture in a group', () => {
     const { container } = render(<TypingBubble typers={[alice]} group />);
     const [face] = faces(container);
-    expect(face).toHaveTextContent('AM'); // their initials, on their own colour
+    // Their character (the default one until they make their own), on their own colour.
+    expect(face!.querySelector('svg')).not.toBeNull();
     expect(face!.querySelector<HTMLElement>('span[style*="background"]')).toHaveStyle({
       backgroundColor: '#6366f1',
     });

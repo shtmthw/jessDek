@@ -29,6 +29,12 @@ model User {
   email        String   @unique
   passwordHash String
   avatarColor  String   @default("#71717a")
+  /// Avatar recipe (JSON, at most 1 KiB). Null means the default character. Drawn by the client.
+  avatar       String?
+  /// Card recipe (JSON, at most 4 KiB). Null means the default card. Drawn by the client.
+  card         String?
+  /// Signed-out visitors can open the card at /@username.
+  cardShared   Boolean  @default(false)
   createdAt    DateTime @default(now())
   lastSeenAt   DateTime @default(now())
 
@@ -37,6 +43,7 @@ model User {
   createdChats  Conversation[]       @relation("ConversationCreator")
   blocking      Block[]              @relation("Blocker")
   blockedBy     Block[]              @relation("Blocked")
+  reactions     Reaction[]
 }
 
 /// `blocker` blocked `blocked`: no DMs or group invites from them, and no presence or typing
@@ -94,12 +101,35 @@ model Message {
   senderId       String
   body           String
   createdAt      DateTime @default(now())
+  /// The message this one replies to (same conversation). Null when it isn't a reply.
+  replyToId      String?
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender       User         @relation(fields: [senderId], references: [id])
   attachments  Attachment[]
+  replyTo      Message?     @relation("Replies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies      Message[]    @relation("Replies")
+  reactions    Reaction[]
 
   @@index([conversationId, createdAt, id])
+  @@index([replyToId])
+}
+
+/// One reaction per person per message.
+model Reaction {
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+  /// When the person last set it: changing the emoji counts as reacting again.
+  updatedAt DateTime @updatedAt
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, userId])
+  @@index([userId])
+  @@index([updatedAt])
 }
 
 /// Metadata only. The bytes live on people's devices and travel device to device.

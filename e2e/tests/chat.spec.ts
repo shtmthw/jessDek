@@ -140,7 +140,9 @@ for (const [label, viewport] of [
       const bubble = u.page.locator('[data-typing-bubble]');
       await expect(bubble).toBeVisible();
       await expect(bubble.locator('[data-typing-face]')).toHaveCount(1);
-      await expect(bubble.locator('[data-typing-face]')).toContainText('A');
+      // Their face: the default character (they haven't made their own), titled with their name.
+      await expect(bubble.locator('[data-typing-face] svg')).toHaveCount(1);
+      await expect(bubble.locator('[data-typing-face]')).toHaveAttribute('title', a.username);
       await expect(bubble.locator('.typing-dot')).toHaveCount(3);
     }
 

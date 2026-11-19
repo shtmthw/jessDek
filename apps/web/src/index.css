@@ -124,6 +124,46 @@
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--muted-foreground) 35%, transparent) transparent;
 }
+/* Strips that scroll sideways but read as a row of chips (unlayered, like the rule above). */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Day labels in a chat: pinned at the top over another day's messages, they show only while
+   scrolling (see MessageList's markPinnedDays). In their own place they always show. */
+[data-day-pill] {
+  transition: opacity 0.35s var(--ease-out-quint);
+}
+[data-day-pill][data-pinned] {
+  opacity: 0;
+}
+[data-scrolling] [data-day-pill][data-pinned] {
+  opacity: 1;
+  transition-duration: 0.12s;
+}
+
+/* A sideways-scrolling strip fades out at an edge while there is more that way (see
+   lib/scrollEdges.ts), so a half-visible label reads as "keep scrolling", not as a glitch. */
+.edge-fade {
+  --fade-start: 0px;
+  --fade-end: 0px;
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 var(--fade-start),
+    #000 calc(100% - var(--fade-end)),
+    transparent
+  );
+}
+.edge-fade[data-more-start] {
+  --fade-start: 2.5rem;
+}
+.edge-fade[data-more-end] {
+  --fade-end: 2.5rem;
+}
 
 /* The conversation column: always the full width of the chat pane, at any resolution, so
    bubbles sit near their own sides. Gutters scale with the pane (about 4%, 12–72px). */
@@ -223,5 +263,38 @@
   *::before,
   *::after {
     scroll-behavior: auto !important;
+  }
+}
+
+/* The message a quote jumped to: a soft brand ring that pulses twice and fades. */
+@keyframes message-flash {
+  0%,
+  40% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-text) 55%, transparent);
+  }
+  20%,
+  60% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--brand-text) 20%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 3px transparent;
+  }
+}
+.message-flash {
+  animation: message-flash 1.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .message-flash {
+    animation-duration: 2.4s;
+    animation-name: message-flash-still;
+  }
+  @keyframes message-flash-still {
+    0%,
+    70% {
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-text) 55%, transparent);
+    }
+    100% {
+      box-shadow: 0 0 0 3px transparent;
+    }
   }
 }

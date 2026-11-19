@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { Prisma } from '@prisma/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { withCardMeta } from '../src/app.js';
 import { config } from '../src/config.js';
 import { prisma } from '../src/db.js';
 import { Client, newApp, resetDb, signUp } from './helpers.js';
@@ -403,6 +404,100 @@ describe('profile & health', () => {
     expect(bad.errors![0]!.extensions!.code).toBe('BAD_USER_INPUT');
   });
 
+  it('saves an avatar recipe, re-serialized, and resets it with null', async () => {
+    const a = new Client(app);
+    await signUp(a, 'alice');
+    const SAVE = `mutation($i: UpdateAvatarInput!) { updateAvatar(input: $i) { avatarColor avatar } }`;
+    const fresh = await a.gql(`{ me { avatar avatarColor } }`);
+    expect(fresh.data!.me.avatar).toBeNull();
+
+    const saved = await a.gql(SAVE, {
+      i: {
+        avatarColor: '#22c55e',
+        avatar: '{ "v": 1,  "style": "character", "hair": "space-buns" }',
+      },
+    });
+    expect(saved.errors).toBeUndefined();
+    expect(saved.data!.updateAvatar).toEqual({
+      avatarColor: '#22c55e',
+      avatar: '{"v":1,"style":"character","hair":"space-buns"}',
+    });
+    // Others see it too.
+    const b = new Client(app);
+    await signUp(b, 'bob');
+    const seen = await b.gql(`{ searchUsers(query: "ali") { avatar } }`);
+    expect(seen.data!.searchUsers[0].avatar).toBe(
+      '{"v":1,"style":"character","hair":"space-buns"}',
+    );
+
+    // Leaving the recipe out changes only the colour.
+    const colourOnly = await a.gql(SAVE, { i: { avatarColor: '#0ea5e9' } });
+    expect(colourOnly.data!.updateAvatar).toEqual({
+      avatarColor: '#0ea5e9',
+      avatar: '{"v":1,"style":"character","hair":"space-buns"}',
+    });
+
+    const reset = await a.gql(SAVE, { i: { avatarColor: '#22c55e', avatar: null } });
+    expect(reset.data!.updateAvatar.avatar).toBeNull();
+  });
+
+  it('rejects avatar recipes that aren’t a small flat object, and bad colours', async () => {
+    const a = new Client(app);
+    await signUp(a, 'alice');
+    const SAVE = `mutation($i: UpdateAvatarInput!) { updateAvatar(input: $i) { id } }`;
+    const tooMany = JSON.stringify(
+      Object.fromEntries(
+        Array.from({ length: 33 }, (_, i) => [
+          `k${String.fromCharCode(97 + (i % 26))}${'x'.repeat(Math.floor(i / 26))}`,
+          'a',
+        ]),
+      ),
+    );
+    const oversize = JSON.stringify(
+      Object.fromEntries(
+        Array.from({ length: 32 }, (_, i) => [
+          `key${String.fromCharCode(97 + (i % 26))}${'y'.repeat(Math.floor(i / 26) + 8)}`,
+          'v'.repeat(24),
+        ]),
+      ),
+    );
+    const bad = [
+      'not json',
+      '[1,2]',
+      'null',
+      '"hair"',
+      '{"hair":{"style":"afro"}}',
+      '{"hair":["afro"]}',
+      `{"hair":"${'a'.repeat(25)}"}`,
+      '{"hair":"Afro!"}',
+      '{"hair-style":"afro"}',
+      '{"v":1000}',
+      '{"v":1.5}',
+      tooMany,
+      oversize,
+    ];
+    for (const avatar of bad) {
+      const res = await a.gql(SAVE, { i: { avatarColor: '#22c55e', avatar } });
+      expect(res.errors?.[0]?.extensions?.code, avatar).toBe('BAD_USER_INPUT');
+    }
+    const color = await a.gql(SAVE, { i: { avatarColor: 'pink', avatar: null } });
+    expect(color.errors![0]!.extensions!.code).toBe('BAD_USER_INPUT');
+    const me = await a.gql(`{ me { avatar } }`);
+    expect(me.data!.me.avatar).toBeNull();
+  });
+
+  it('rate limits avatar saves', async () => {
+    const a = new Client(app);
+    await signUp(a, 'alice');
+    const SAVE = `mutation($i: UpdateAvatarInput!) { updateAvatar(input: $i) { id } }`;
+    for (let i = 0; i < 30; i++) {
+      const ok = await a.gql(SAVE, { i: { avatarColor: '#22c55e', avatar: null } });
+      expect(ok.errors).toBeUndefined();
+    }
+    const limited = await a.gql(SAVE, { i: { avatarColor: '#22c55e', avatar: null } });
+    expect(limited.errors![0]!.extensions!.code).toBe('RATE_LIMITED');
+  });
+
   it('reports health and readiness', async () => {
     expect((await app.inject('/healthz')).json()).toEqual({ ok: true });
     expect((await app.inject('/readyz')).json()).toEqual({ ok: true });
@@ -714,5 +809,307 @@ describe('blocking, muting and removing', () => {
     const history = await a.gql(MESSAGES, { c: group.id });
     expect(history.data!.messages.messages.map((m: { body: string }) => m.body)).toContain('hello');
     expect(code(await a.gql(REMOVE, { c: group.id, u: ids.carol }))).toBe('NOT_FOUND');
+  });
+});
+
+describe('replies and reactions', () => {
+  const SEND_REPLY = `mutation($c: ID!, $b: String!, $r: ID) {
+    sendMessage(conversationId: $c, body: $b, replyToId: $r) {
+      id body replyTo { id body sender { username } }
+    }
+  }`;
+  const REACT = `mutation($m: ID!, $e: String) {
+    react(messageId: $m, emoji: $e) { id reactions { emoji reactedAt user { username } } }
+  }`;
+  const LIST = `{ conversations { id unreadCount lastReaction { emoji user { username } message { id } } } }`;
+
+  /** alice, bob and carol in a group, with one message from each of alice and bob. */
+  async function group() {
+    const [a, b, c] = [new Client(app), new Client(app), new Client(app)];
+    await signUp(a, 'alice');
+    await signUp(b, 'bob');
+    await signUp(c, 'carol');
+    const g = (
+      await a.gql(`mutation { createGroup(name: "Trip", usernames: ["bob", "carol"]) { id } }`)
+    ).data!.createGroup as { id: string };
+    const fromAlice = (await a.gql(SEND, { c: g.id, b: 'leaving at 7' })).data!.sendMessage;
+    const fromBob = (await b.gql(SEND, { c: g.id, b: 'see you there' })).data!.sendMessage;
+    return { a, b, c, g, fromAlice, fromBob };
+  }
+
+  it('sends a reply that quotes the original, and lists it with the quote', async () => {
+    const { b, g, fromAlice } = await group();
+    const reply = await b.gql(SEND_REPLY, { c: g.id, b: 'works for me', r: fromAlice.id });
+    expect(reply.errors).toBeUndefined();
+    expect(reply.data!.sendMessage.replyTo).toEqual({
+      id: fromAlice.id,
+      body: 'leaving at 7',
+      sender: { username: 'alice' },
+    });
+    const page = await b.gql(
+      `query($c: ID!) { messages(conversationId: $c) { messages { body replyTo { id } reactions { emoji } } } }`,
+      { c: g.id },
+    );
+    const list = page.data!.messages.messages;
+    expect(list.at(-1)).toEqual({
+      body: 'works for me',
+      replyTo: { id: fromAlice.id },
+      reactions: [],
+    });
+    expect(list[0].replyTo).toBeNull();
+  });
+
+  it('refuses a reply to a message from another chat', async () => {
+    const { a, g } = await group();
+    const { a: other } = await twoUsersIn('dora', 'eli');
+    const dm = (await other.gql(START_DIRECT, { u: 'eli' })).data!.startDirect;
+    const elsewhere = (await other.gql(SEND, { c: dm.id, b: 'private' })).data!.sendMessage;
+    const res = await a.gql(SEND_REPLY, { c: g.id, b: 'hi', r: elsewhere.id });
+    expect(res.errors![0]!.extensions!.code).toBe('BAD_USER_INPUT');
+    expect(res.errors![0]!.message).toBe('You can only reply to a message in this chat');
+  });
+
+  it('keeps one reaction per person: set, change, same again is a no-op, null removes', async () => {
+    const { a, b, fromAlice } = await group();
+    const set = await b.gql(REACT, { m: fromAlice.id, e: '❤️' });
+    expect(set.data!.react.reactions).toMatchObject([{ emoji: '❤️', user: { username: 'bob' } }]);
+    const firstAt = set.data!.react.reactions[0].reactedAt;
+
+    await a.gql(REACT, { m: fromAlice.id, e: '😂' });
+    await new Promise((r) => setTimeout(r, 5));
+    const changed = await b.gql(REACT, { m: fromAlice.id, e: '👍🏽' });
+    // In the order people first reacted, so changing an emoji doesn't move you.
+    expect(changed.data!.react.reactions.map((r: { emoji: string }) => r.emoji)).toEqual([
+      '👍🏽',
+      '😂',
+    ]);
+    expect(changed.data!.react.reactions[0].reactedAt > firstAt).toBe(true);
+
+    const same = await b.gql(REACT, { m: fromAlice.id, e: '👍🏽' });
+    expect(same.data!.react.reactions[0].reactedAt).toBe(
+      changed.data!.react.reactions[0].reactedAt,
+    );
+
+    const removed = await b.gql(REACT, { m: fromAlice.id, e: null });
+    expect(removed.data!.react.reactions).toMatchObject([
+      { emoji: '😂', user: { username: 'alice' } },
+    ]);
+    // Removing a reaction you don't have is harmless.
+    const again = await b.gql(REACT, { m: fromAlice.id, e: null });
+    expect(again.errors).toBeUndefined();
+  });
+
+  it('accepts only a single emoji', async () => {
+    const { b, fromAlice } = await group();
+    for (const e of ['a', '❤️❤️', '', '❤', 'x'.repeat(65), '🙂 ']) {
+      const res = await b.gql(REACT, { m: fromAlice.id, e });
+      expect(res.errors?.[0]?.extensions?.code, JSON.stringify(e)).toBe('BAD_USER_INPUT');
+    }
+    for (const e of ['👨‍👩‍👧', '🇮🇳', '1️⃣']) {
+      const res = await b.gql(REACT, { m: fromAlice.id, e });
+      expect(res.errors, e).toBeUndefined();
+    }
+  });
+
+  it('keeps reactions to members, and out of blocked direct chats', async () => {
+    const { fromAlice } = await group();
+    const stranger = new Client(app);
+    await signUp(stranger, 'mallory');
+    const res = await stranger.gql(REACT, { m: fromAlice.id, e: '❤️' });
+    expect(res.errors![0]!.extensions!.code).toBe('NOT_FOUND');
+
+    const { a, b } = await twoUsersIn('fay', 'gus');
+    const conv = (await a.gql(START_DIRECT, { u: 'gus' })).data!.startDirect;
+    const msg = (await a.gql(SEND, { c: conv.id, b: 'hi gus' })).data!.sendMessage;
+    const gus = (await b.gql(`{ me { id } }`)).data!.me.id;
+    await a.gql(`mutation($u: ID!) { blockUser(userId: $u) { id } }`, { u: gus });
+    const blocked = await b.gql(REACT, { m: msg.id, e: '❤️' });
+    expect(blocked.errors![0]!.extensions!.code).toBe('FORBIDDEN');
+    const blocker = await a.gql(REACT, { m: msg.id, e: '❤️' });
+    expect(blocker.errors![0]!.extensions!.code).toBe('FORBIDDEN');
+  });
+
+  it('rate limits reaction changes', async () => {
+    const { b, fromAlice } = await group();
+    for (let i = 0; i < 40; i++) {
+      const res = await b.gql(REACT, { m: fromAlice.id, e: i % 2 ? '❤️' : '👍' });
+      expect(res.errors).toBeUndefined();
+    }
+    const limited = await b.gql(REACT, { m: fromAlice.id, e: '😂' });
+    expect(limited.errors![0]!.extensions!.code).toBe('RATE_LIMITED');
+  });
+
+  it('mentions a reaction in the chat list for the reactor and the author only, until the next message', async () => {
+    const { a, b, c, g, fromAlice } = await group();
+    const listOf = async (client: Client) =>
+      (await client.gql(LIST)).data!.conversations.find((x: { id: string }) => x.id === g.id);
+
+    await c.gql(REACT, { m: fromAlice.id, e: '😮' });
+    expect((await listOf(c)).lastReaction).toEqual({
+      emoji: '😮',
+      user: { username: 'carol' },
+      message: { id: fromAlice.id },
+    });
+    expect((await listOf(a)).lastReaction).toMatchObject({ emoji: '😮' });
+    expect((await listOf(b)).lastReaction).toBeNull();
+
+    await b.gql(SEND, { c: g.id, b: 'anything else?' });
+    expect((await listOf(a)).lastReaction).toBeNull();
+    expect((await listOf(c)).lastReaction).toBeNull();
+  });
+
+  it('never counts as unread or reorders the chat list', async () => {
+    const { a, b, g, fromBob } = await group();
+    // A second chat for alice, newer than the group.
+    await b.gql(START_DIRECT, { u: 'alice' }).then(async (r) => {
+      await b.gql(SEND, { c: r.data!.startDirect.id, b: 'newer' });
+    });
+    await a.gql(`mutation($c: ID!) { markRead(conversationId: $c) { id } }`, { c: g.id });
+    const before = (await a.gql(LIST)).data!.conversations;
+    await b.gql(REACT, { m: fromBob.id, e: '❤️' }); // bob on his own message
+    await b.gql(REACT, { m: fromBob.id, e: '😂' });
+    const after = (await a.gql(LIST)).data!.conversations;
+    expect(after.map((x: { id: string }) => x.id)).toEqual(before.map((x: { id: string }) => x.id));
+    expect(after.find((x: { id: string }) => x.id === g.id).unreadCount).toBe(0);
+  });
+});
+
+/** Two fresh users (signed up as `x` and `y`). */
+async function twoUsersIn(x: string, y: string) {
+  const a = new Client(app);
+  const b = new Client(app);
+  await signUp(a, x);
+  await signUp(b, y);
+  return { a, b };
+}
+
+describe('cards', () => {
+  const CARD = `query($u: String!) { card(username: $u) { id recipe shared user { username online lastSeenAt } } }`;
+  const SAVE = `mutation($i: UpdateCardInput!) { updateCard(input: $i) { id recipe shared } }`;
+  const code = (r: { errors?: Array<{ extensions?: { code?: string } }> }) =>
+    r.errors?.[0]?.extensions?.code;
+  const recipe = (o: Record<string, unknown>) => JSON.stringify({ v: 1, ...o });
+
+  it('saves, reads back, resets with null and toggles sharing', async () => {
+    const { a, b } = await twoUsers();
+    const saved = await a.gql(SAVE, {
+      i: { recipe: recipe({ about: 'Hi!', bg: 'mint', labels: false, interests: ['pizza'] }) },
+    });
+    expect(saved.errors).toBeUndefined();
+    expect(JSON.parse(saved.data!.updateCard.recipe)).toEqual({
+      v: 1,
+      about: 'Hi!',
+      bg: 'mint',
+      labels: false,
+      interests: ['pizza'],
+    });
+    expect(saved.data!.updateCard.shared).toBe(false);
+
+    // Someone signed in sees it, without the owner-only `shared`.
+    const seen = await b.gql(CARD, { u: 'alice' });
+    expect(JSON.parse(seen.data!.card.recipe).about).toBe('Hi!');
+    expect(seen.data!.card.shared).toBeNull();
+
+    // Leaving `recipe` out keeps it; `shared` toggles.
+    const shared = await a.gql(SAVE, { i: { shared: true } });
+    expect(shared.data!.updateCard.shared).toBe(true);
+    expect(JSON.parse(shared.data!.updateCard.recipe).bg).toBe('mint');
+
+    const reset = await a.gql(SAVE, { i: { recipe: null } });
+    expect(reset.data!.updateCard.recipe).toBeNull();
+    expect(reset.data!.updateCard.shared).toBe(true);
+  });
+
+  it('signed out, only shared cards show, and unknown people look the same', async () => {
+    const { a } = await twoUsers();
+    const visitor = new Client(app);
+    expect((await visitor.gql(CARD, { u: 'alice' })).data!.card).toBeNull();
+    expect((await visitor.gql(CARD, { u: 'nobody_here' })).data!.card).toBeNull();
+    await a.gql(SAVE, { i: { shared: true } });
+    const open = await visitor.gql(CARD, { u: '@Alice' });
+    expect(open.data!.card.user.username).toBe('alice');
+    // No presence for visitors.
+    expect(open.data!.card.user.online).toBe(false);
+    expect(open.data!.card.user.lastSeenAt).toBeNull();
+    expect(open.data!.card.shared).toBeNull();
+  });
+
+  it('someone who blocked you has no card for you', async () => {
+    const { a, b } = await twoUsers();
+    const bobId = (await prisma.user.findUnique({ where: { username: 'bob' } }))!.id;
+    await a.gql(`mutation($u: ID!) { blockUser(userId: $u) { id } }`, { u: bobId });
+    expect((await b.gql(CARD, { u: 'alice' })).data!.card).toBeNull();
+    // The blocker can still look at the person they blocked.
+    expect((await a.gql(CARD, { u: 'bob' })).data!.card.user.username).toBe('bob');
+  });
+
+  it('rejects cards that break the limits', async () => {
+    const { a } = await twoUsers();
+    const sticker = { k: 'star', x: 0.5, y: 0.5, s: 1, r: 0 };
+    const bads: unknown[] = [
+      '[1]',
+      'nope',
+      recipe({ about: 'x'.repeat(151) }),
+      recipe({ about: 'a\nb\nc\nd\ne' }),
+      recipe({ interests: ['a', 'b', 'c', 'd', 'e', 'f', 'g'] }),
+      recipe({ interests: [{ t: 'x'.repeat(19) }] }),
+      recipe({ interests: [{ t: 'ok', e: 'abc' }] }),
+      recipe({ stickers: Array.from({ length: 9 }, () => sticker) }),
+      recipe({ stickers: [{ ...sticker, x: 1.5 }] }),
+      recipe({ stickers: [{ ...sticker, s: 3 }] }),
+      recipe({ stickers: [{ ...sticker, e: '🍕' }] }),
+      recipe({ stickers: [{ ...sticker, extra: 1 }] }),
+      recipe({ bg: { nested: true } }),
+      recipe({ bg: 'Not A Slug' }),
+      recipe({ 'bad-key': 'x' }),
+      recipe(
+        Object.fromEntries(
+          Array.from({ length: 41 }, (_, i) => [
+            `k${'abcdefghij'[i % 10]}${'abcdefghij'[Math.floor(i / 10)]}`,
+            'x',
+          ]),
+        ),
+      ),
+    ];
+    for (const r of bads) {
+      const res = await a.gql(SAVE, { i: { recipe: r } });
+      expect(code(res), String(r).slice(0, 60)).toBe('BAD_USER_INPUT');
+    }
+    const long = await a.gql(SAVE, { i: { recipe: recipe({ about: 'x'.repeat(151) }) } });
+    expect(long.errors![0]!.message).toBe('About me is too long');
+  });
+
+  it('normalizes text, drops duplicate interests and rounds sticker numbers', async () => {
+    const { a } = await twoUsers();
+    const res = await a.gql(SAVE, {
+      i: {
+        recipe: recipe({
+          about: '  Hello  \r\nthere\u0007  ',
+          interests: ['pizza', 'pizza', { t: ' Synths ', e: '🎹' }, { t: 'SYNTHS' }],
+          stickers: [{ e: '🍕', x: 0.123456, y: 0.5, s: 1.23456, r: 12.7, c: 'red' }],
+        }),
+      },
+    });
+    expect(res.errors).toBeUndefined();
+    const card = JSON.parse(res.data!.updateCard.recipe);
+    expect(card.about).toBe('Hello\nthere');
+    expect(card.interests).toEqual(['pizza', { t: 'Synths', e: '🎹' }]);
+    expect(card.stickers).toEqual([{ e: '🍕', x: 0.123, y: 0.5, s: 1.23, r: 13, c: 'red' }]);
+  });
+
+  it('adds escaped link-preview tags for a shared card', () => {
+    const html = withCardMeta(
+      '<html><head><title>Realtime</title></head></html>',
+      'Bob <b>',
+      'bob',
+      JSON.stringify({ about: 'Hi "there"\nsecond line' }),
+    );
+    expect(html).toContain('<title>Bob &#60;b&#62; (@bob) on Realtime</title>');
+    expect(html).toContain('<meta property="og:description" content="Hi &#34;there&#34;">');
+  });
+
+  it('needs sign-in to save', async () => {
+    const visitor = new Client(app);
+    expect(code(await visitor.gql(SAVE, { i: { shared: true } }))).toBe('UNAUTHENTICATED');
   });
 });

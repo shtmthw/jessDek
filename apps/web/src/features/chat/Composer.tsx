@@ -15,11 +15,13 @@ import { setPref, usePref } from '@/features/media/prefs';
 import { addFiles, takeTray, useHd, useTray, type TrayItem } from '@/features/media/trayStore';
 import { cn } from '@/lib/cn';
 import { getDraft, setDraft } from '@/lib/drafts';
+import type { ReplyTo } from '@/lib/gql';
 import { COMPOSER_ID } from '@/lib/keys';
 import { isTouchDevice } from '@/lib/media';
 import { exit, spring } from '@/lib/motion';
 import { AttachmentTray } from './media/AttachmentTray';
 import { MediaIntro } from './media/MediaIntro';
+import { ReplyBar } from './replies/ReplyQuote';
 
 const MAX_LENGTH = 4000;
 /** The remaining-characters counter appears once you're this close to the limit. */
@@ -31,6 +33,9 @@ export function Composer({
   placeholder = 'Message',
   draftKey,
   autoFocus,
+  replyTo,
+  viewerId,
+  onCancelReply,
 }: {
   /** `items` are the photos and videos from the tray (ownership passes to the caller). */
   onSend: (body: string, items?: TrayItem[]) => void;
@@ -40,6 +45,10 @@ export function Composer({
   draftKey?: string;
   /** Focus on mount (skipped on touch devices so the keyboard doesn't jump up). */
   autoFocus?: boolean;
+  /** The message being replied to, shown above the text field. */
+  replyTo?: ReplyTo | null;
+  viewerId?: string;
+  onCancelReply?: () => void;
 }) {
   const [value, setValue] = useState(() => (draftKey ? getDraft(draftKey) : ''));
   const [launches, setLaunches] = useState(0);
@@ -105,6 +114,12 @@ export function Composer({
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    // Esc lets go of a reply first (before it would leave the chat).
+    if (e.key === 'Escape' && replyTo && onCancelReply) {
+      e.preventDefault();
+      onCancelReply();
+      return;
+    }
     // Enter sends on desktop; on touch keyboards Enter inserts a new line (use the button).
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && !isTouchDevice()) {
       e.preventDefault();
@@ -133,6 +148,26 @@ export function Composer({
         )}
       >
         <AutoHeight>
+          <AnimatePresence initial={false} mode="popLayout">
+            {replyTo && viewerId && onCancelReply ? (
+              <motion.div
+                key={replyTo.id}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, transition: exit.fast }}
+                transition={spring.soft}
+              >
+                <ReplyBar
+                  quote={replyTo}
+                  viewerId={viewerId}
+                  onCancel={() => {
+                    onCancelReply();
+                    ref.current?.focus();
+                  }}
+                />
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
           {hasMedia ? <AttachmentTray trayKey={trayKey} items={items} hd={hd} /> : null}
         </AutoHeight>
         <div className="flex items-end gap-1">

@@ -132,6 +132,7 @@ export async function sendMessage(
   conversationId: string,
   body: unknown,
   attachments?: unknown,
+  replyToId?: string | null,
 ): Promise<MessageWithSender> {
   const text = parseInput(captionSchema, body);
   const list = parseInput(attachmentsSchema, attachments ?? [], 'attachments');
@@ -148,6 +149,16 @@ export async function sendMessage(
     if (!other || (await blockedBetween(userId, other.userId)))
       throw fail('FORBIDDEN', 'You can’t message this person');
   }
+  if (replyToId) {
+    const original = await prisma.message.findUnique({
+      where: { id: replyToId },
+      select: { conversationId: true },
+    });
+    if (original?.conversationId !== conversationId)
+      throw fail('BAD_USER_INPUT', 'You can only reply to a message in this chat', {
+        field: 'replyToId',
+      });
+  }
   if (!sendLimiter.allow(userId)) throw fail('RATE_LIMITED', 'You’re sending messages too fast');
   sendLimiter.hit(userId);
 
@@ -159,6 +170,7 @@ export async function sendMessage(
         senderId: userId,
         body: text,
         createdAt: now,
+        replyToId: replyToId || null,
         attachments: { create: list.map(toRow) },
       },
       include: messageInclude,

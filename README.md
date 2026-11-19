@@ -38,11 +38,53 @@ To stop, run `docker compose down`. Your data is kept in the `realtime_db` volum
 - **Instant delivery.** Messages, typing indicators, unread counts and online status arrive live over WebSockets, with no polling.
 - **Direct messages and group chats.** Find people by username with live search. Create groups, add members later, rename or leave them.
 - **Photos and videos, device to device.** Sent straight between browsers over WebRTC and never stored on the server. They can be downloaded while someone who has them is online. Up to 10 per message, with a caption.
+- **Replies and reactions.** Reply to any message and it arrives with a quote of the original; tap the quote to jump back to it. React with one emoji per person: six quick ones, or any emoji from a searchable picker. On phones, long-press a message for reactions and swipe it right to reply; on desktop, hover it or right-click. Reactions are quiet: no sound, and they never count as unread.
 - **You decide who reaches you.** Block someone and they can't message you, start a chat with you or add you to groups, and neither of you sees the other's online status. Mute any chat, remove a direct chat from your list, and (as a group's owner) remove members.
 - **Pleasant to use.** Messages appear immediately and retry if sending fails. Unread badges, a "new messages" pill, infinite scroll through history, day separators, a reconnecting banner, and `Ctrl/⌘ + K` to start a new chat.
 - **Mobile-first.** A single pane with back navigation on phones and two panes on desktop. Respects safe areas, uses 44 px tap targets, follows your system's light or dark theme, and can be installed as a PWA.
 - **Secure by default.** argon2id password hashing, httpOnly session cookies, rate limiting, input validation, and membership checks on every operation.
 - **One image.** The API and the web app ship together as `matthew552/realtime`. The only other container is PostgreSQL.
+
+## Avatars
+
+Everyone has a cartoon character as their avatar, drawn head and shoulders on their own background colour. It starts as the same default character for everybody, and you dress it up in **Settings → Edit avatar**:
+
+- **Face:** 10 skin tones, 6 face shapes, 16 eyes in 7 colours, brows, noses, 14 mouths, blush and freckles, and cheek stickers.
+- **Hair:** 36 styles in 16 colours (long styles tuck behind the ears and fall over the shoulders), and hair clips.
+- **Wardrobe:** 27 hats and headwear, 21 tops, 14 neck accessories, glasses, 8 earrings, and 19 colours for hats, tops, neck items, clips and earrings.
+- **A little pet** on your shoulder: a cat, puppy, chick, bunny, frog, ghost, hamster or bear.
+
+**Specials** are nine ready-made characters in a finer, softer style: thin lines, doe eyes and tiny mouths, with beanies, headphones, bead necklaces, a checkered sweater and more. Pick one in the studio's Specials tab, then change anything in the other tabs as usual. The **Fine** line weight works on any look.
+
+The studio has undo (`Ctrl/⌘ + Z`) and a randomize button. Unsaved changes wait on your device until you come back. If you'd rather not have a character, you can show your initials instead.
+
+Avatars are drawn in the browser as SVG. The server stores only a small "recipe" naming the chosen items (at most 1 KiB of JSON), so there are no image uploads. A change shows up straight away for everyone who shares a chat with you.
+
+<div align="center">
+
+<img src="docs/screenshots/avatar-studio-light.png" alt="The avatar studio on a desktop: a live preview beside a grid of hats" width="620">
+<img src="docs/screenshots/avatar-studio-phone-dark.png" alt="The avatar studio on a phone, dark theme" width="190">
+<img src="docs/screenshots/avatar-specials-light.png" alt="The avatar studio's Specials tab: nine ready-made characters with fine lines" width="620">
+
+</div>
+
+## Cards
+
+Everyone has a **card**: a portrait card with their `@username`, their avatar, up to six interests and a short "about me", plus a **Message** button. Tap someone in a chat header, a group's member list, a group message or New chat search to see theirs. Design your own in **Settings → Your card**:
+
+- **Words:** an about of up to 150 characters, and interests picked from about 100 built-in ones, or your own with an emoji.
+- **Look:** solid and gradient backgrounds, patterns, borders and corners, finishes (gloss, holographic, glitter, paper), four layouts, seven fonts, dividers, interest and button styles, and a frame and ring for your avatar.
+- **Stickers:** up to eight, drawn in the avatar style or any emoji. Drag them anywhere, resize and turn them, or pinch on a phone.
+
+Every card is the same size, so long text shrinks to fit. Each card has a link, `/@username`. People on Realtime can always open it; turn on **Share my card** and anyone can, even without an account. Their Message button asks them to sign in or sign up, then opens the chat with you. Like avatars, cards are drawn in the browser from a small recipe (at most 4 KiB of JSON).
+
+<div align="center">
+
+<img src="docs/screenshots/card-studio-light.png" alt="The card studio on a desktop: a live card preview beside sticker options" width="620">
+<img src="docs/screenshots/card-studio-phone-dark.png" alt="The card studio on a phone, dark theme" width="190">
+<img src="docs/screenshots/card-public-light.png" alt="Bob's shared card, opened by someone who isn't signed in" width="620">
+
+</div>
 
 ## Screenshots
 

@@ -63,6 +63,8 @@ const cache = new InMemoryCache({
       },
     },
     MessagePage: { keyFields: false },
+    // A message's reactions always arrive whole (from a fetch, a reaction or a live event): replace them.
+    Message: { fields: { reactions: { merge: false } } },
   },
 });
 

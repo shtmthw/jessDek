@@ -7,6 +7,8 @@ export interface User {
   username: string;
   displayName: string;
   avatarColor: string;
+  /** The avatar recipe (JSON). Null: the default character. */
+  avatar: string | null;
   online: boolean;
   /** Null when hidden from you (a block between you). */
   lastSeenAt: string | null;
@@ -18,6 +20,8 @@ export interface Viewer {
   displayName: string;
   email: string;
   avatarColor: string;
+  /** The avatar recipe (JSON). Null: the default character. */
+  avatar: string | null;
 }
 export type AttachmentKind = 'IMAGE' | 'VIDEO';
 export type MediaPart = 'FILE' | 'POSTER';
@@ -49,6 +53,40 @@ export interface Message {
   createdAt: string;
   sender: User;
   attachments: Attachment[];
+  /** The message this one replies to; null when it isn't a reply. */
+  replyTo: ReplyTo | null;
+  /** One per person, in the order they first reacted. */
+  reactions: Reaction[];
+}
+/** The quoted message on a reply: just enough to draw the quote. */
+export interface ReplyTo {
+  __typename?: 'Message';
+  id: string;
+  body: string;
+  createdAt: string;
+  sender: Pick<User, 'id' | 'displayName' | 'avatarColor'> & { __typename?: 'User' };
+  attachments: Attachment[];
+}
+export interface Reaction {
+  __typename?: 'Reaction';
+  emoji: string;
+  /** When this person last set it (ISO 8601). */
+  reactedAt: string;
+  user: Pick<User, 'id' | 'displayName'> & { __typename?: 'User' };
+}
+/** What the chat list mentions: the newest reaction by you or on your message, if newer than the last message. */
+export interface ReactionPreview {
+  __typename?: 'ReactionPreview';
+  emoji: string;
+  reactedAt: string;
+  user: Pick<User, 'id' | 'displayName'> & { __typename?: 'User' };
+  message: {
+    __typename?: 'Message';
+    id: string;
+    body: string;
+    sender: { __typename?: 'User'; id: string };
+    attachments: Array<{ __typename?: 'Attachment'; id: string; kind: AttachmentKind }>;
+  };
 }
 export interface IceServer {
   urls: string[];
@@ -85,6 +123,8 @@ export interface Conversation {
   canMessage: boolean;
   /** Groups: the member who can remove people. */
   ownerId: string | null;
+  /** The reaction the chat list mentions, if any. */
+  lastReaction: ReactionPreview | null;
 }
 export interface MessagePage {
   __typename?: 'MessagePage';
@@ -92,11 +132,28 @@ export interface MessagePage {
   hasMore: boolean;
 }
 
+/** Someone's card. `recipe` null: the default card. `shared`: only on your own card. */
+export interface Card {
+  __typename?: 'Card';
+  id: string;
+  recipe: string | null;
+  shared: boolean | null;
+  user: User;
+}
+
 export type ChatEvent =
   | { __typename: 'MessageAdded'; conversationId: string; message: Message }
   | { __typename: 'ConversationUpdated'; conversationId: string; conversation: Conversation | null }
   | { __typename: 'TypingStarted'; conversationId: string; user: User }
   | { __typename: 'PresenceChanged'; userId: string; online: boolean; lastSeenAt: string | null }
+  /** Someone's name or avatar changed: you (in another tab) or someone you share a chat with. */
+  | { __typename: 'UserUpdated'; user: User }
+  /** Someone's reaction in this chat was added, changed or removed. */
+  | {
+      __typename: 'ReactionChanged';
+      conversationId: string;
+      message: { __typename?: 'Message'; id: string; reactions: Reaction[] };
+    }
   | MediaRequestedEvent
   | MediaSignalEvent;
 
@@ -122,12 +179,13 @@ export interface MediaSignalEvent {
 type Doc<D, V = Record<string, never>> = TypedDocumentNode<D, V>;
 
 // ---- Fragments ----
-const USER_FIELDS = gql`
+export const USER_FIELDS = gql`
   fragment UserFields on User {
     id
     username
     displayName
     avatarColor
+    avatar
     online
     lastSeenAt
   }
@@ -149,6 +207,26 @@ export const ATTACHMENT_FIELDS = gql`
     posterMime
   }
 `;
+export const REACTION_FIELDS = gql`
+  fragment ReactionFields on Reaction {
+    emoji
+    reactedAt
+    user {
+      id
+      displayName
+    }
+  }
+`;
+/** Just a message's reactions, for applying a live ReactionChanged. */
+export const MESSAGE_REACTIONS = gql`
+  fragment MessageReactions on Message {
+    id
+    reactions {
+      ...ReactionFields
+    }
+  }
+  ${REACTION_FIELDS}
+`;
 export const MESSAGE_FIELDS = gql`
   fragment MessageFields on Message {
     id
@@ -161,9 +239,26 @@ export const MESSAGE_FIELDS = gql`
     attachments {
       ...AttachmentFields
     }
+    replyTo {
+      id
+      body
+      createdAt
+      sender {
+        id
+        displayName
+        avatarColor
+      }
+      attachments {
+        ...AttachmentFields
+      }
+    }
+    reactions {
+      ...ReactionFields
+    }
   }
   ${USER_FIELDS}
   ${ATTACHMENT_FIELDS}
+  ${REACTION_FIELDS}
 `;
 export const CONVERSATION_FIELDS = gql`
   fragment ConversationFields on Conversation {
@@ -188,6 +283,25 @@ export const CONVERSATION_FIELDS = gql`
     lastMessage {
       ...MessageFields
     }
+    lastReaction {
+      emoji
+      reactedAt
+      user {
+        id
+        displayName
+      }
+      message {
+        id
+        body
+        sender {
+          id
+        }
+        attachments {
+          id
+          kind
+        }
+      }
+    }
   }
   ${USER_FIELDS}
   ${MESSAGE_FIELDS}
@@ -199,6 +313,7 @@ const VIEWER_FIELDS = gql`
     displayName
     email
     avatarColor
+    avatar
   }
 `;
 
@@ -286,6 +401,52 @@ export const UPDATE_PROFILE: Doc<
   ${VIEWER_FIELDS}
 `;
 
+/** Saves the avatar recipe and background colour. `avatar: null` goes back to the default character. */
+export const UPDATE_AVATAR: Doc<
+  { updateAvatar: Viewer },
+  { input: { avatarColor: string; avatar: string | null } }
+> = gql`
+  mutation UpdateAvatar($input: UpdateAvatarInput!) {
+    updateAvatar(input: $input) {
+      ...ViewerFields
+    }
+  }
+  ${VIEWER_FIELDS}
+`;
+
+const CARD_FIELDS = gql`
+  fragment CardFields on Card {
+    id
+    recipe
+    shared
+    user {
+      ...UserFields
+    }
+  }
+  ${USER_FIELDS}
+`;
+
+export const CARD: Doc<{ card: Card | null }, { username: string }> = gql`
+  query Card($username: String!) {
+    card(username: $username) {
+      ...CardFields
+    }
+  }
+  ${CARD_FIELDS}
+`;
+
+export const UPDATE_CARD: Doc<
+  { updateCard: Card },
+  { input: { recipe?: string | null; shared?: boolean } }
+> = gql`
+  mutation UpdateCard($input: UpdateCardInput!) {
+    updateCard(input: $input) {
+      ...CardFields
+    }
+  }
+  ${CARD_FIELDS}
+`;
+
 export const START_DIRECT: Doc<{ startDirect: Conversation }, { username: string }> = gql`
   mutation StartDirect($username: String!) {
     startDirect(username: $username) {
@@ -339,14 +500,46 @@ export const LEAVE_GROUP: Doc<{ leaveGroup: boolean }, { conversationId: string 
 
 export const SEND_MESSAGE: Doc<
   { sendMessage: Message },
-  { conversationId: string; body: string; attachments?: AttachmentInput[] }
+  {
+    conversationId: string;
+    body: string;
+    attachments?: AttachmentInput[];
+    /** The message this one replies to (same chat). */
+    replyToId?: string | null;
+  }
 > = gql`
-  mutation SendMessage($conversationId: ID!, $body: String!, $attachments: [AttachmentInput!]) {
-    sendMessage(conversationId: $conversationId, body: $body, attachments: $attachments) {
+  mutation SendMessage(
+    $conversationId: ID!
+    $body: String!
+    $attachments: [AttachmentInput!]
+    $replyToId: ID
+  ) {
+    sendMessage(
+      conversationId: $conversationId
+      body: $body
+      attachments: $attachments
+      replyToId: $replyToId
+    ) {
       ...MessageFields
     }
   }
   ${MESSAGE_FIELDS}
+`;
+
+/** Sets your one reaction to a message (another emoji replaces it); `emoji: null` removes it. */
+export const REACT: Doc<
+  { react: { __typename?: 'Message'; id: string; reactions: Reaction[] } },
+  { messageId: string; emoji: string | null }
+> = gql`
+  mutation React($messageId: ID!, $emoji: String) {
+    react(messageId: $messageId, emoji: $emoji) {
+      id
+      reactions {
+        ...ReactionFields
+      }
+    }
+  }
+  ${REACTION_FIELDS}
 `;
 
 // ---- Photos and videos (device to device; these run over the WebSocket) ----
@@ -494,6 +687,20 @@ export const EVENTS: Doc<{ events: ChatEvent }> = gql`
         userId
         online
         lastSeenAt
+      }
+      ... on UserUpdated {
+        user {
+          ...UserFields
+        }
+      }
+      ... on ReactionChanged {
+        conversationId
+        message {
+          id
+          reactions {
+            ...ReactionFields
+          }
+        }
       }
       ... on MediaRequested {
         requestId
