@@ -42,7 +42,7 @@ export interface Paint {
   /** The second colour of two-colour tops (the shirt under a blazer, a print, a patch, checks). */
   accent: string;
   accentShade: string;
-  /** The slim build: skin-showing tops leave out the line at the base of the neck. */
+  /** The slim build (narrower shoulders): things that hug the neck are drawn as they are. */
   slim: boolean;
   /** Unique per rendered avatar, for clip path ids. */
   uid: string;
@@ -62,6 +62,11 @@ export interface Item {
   mid?: Draw;
   /** Drawn in the item's normal slot. */
   front?: Draw;
+  /**
+   * How high it reaches (y, without its outline), for items that rise well above the head. The
+   * figure moves down to keep them in the frame (see `liftFor` in AvatarFigure).
+   */
+  top?: number;
 }
 
 export const outline = {

@@ -73,8 +73,6 @@ export const CardAvatar = memo(function CardAvatar({
   const cutout = card.frame === 'none' && character;
   const shape = FRAME_PATHS[card.frame] ?? FRAME_PATHS.circle!;
   const unit = 100 / size; // layout px → frame units
-  const backdrop =
-    card.frameBg === 'accent' ? theme.accent : card.frameBg === 'card' ? 'none' : user.avatarColor;
 
   if (cutout) {
     return (
@@ -130,7 +128,8 @@ export const CardAvatar = memo(function CardAvatar({
         ) : null}
       </defs>
       <g clipPath={`url(#${uid}-clip)`}>
-        {backdrop !== 'none' ? <rect width={100} height={100} fill={backdrop} /> : null}
+        {/* Always their own avatar colour, so the card shows the avatar they made. */}
+        <rect width={100} height={100} fill={user.avatarColor} />
         {character ? (
           <AvatarFigure
             recipe={recipe}

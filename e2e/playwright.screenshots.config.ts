@@ -1,10 +1,15 @@
 import { execSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { defineConfig, devices } from '@playwright/test';
 import { resetDatabase, root, webServer } from './server';
 
 const PORT = 4312;
 const DATABASE_URL =
   process.env.DATABASE_URL_SHOTS ?? 'postgresql://postgres:postgres@localhost:55432/realtime_shots';
+
+// The seeded users' password, made fresh for each run (the repo is public, so it never holds one).
+// Workers inherit it from the main process, which sets it first.
+process.env.SEED_PASSWORD ??= randomBytes(12).toString('base64url');
 
 // Reset + seed demo data before the server starts, so screenshots are reproducible.
 resetDatabase(DATABASE_URL);

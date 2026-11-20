@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react';
 import { heartPath, INK, MIRROR, starPath, type Item, type Paint } from '../art';
-import { GOLD } from './clothes';
 
 // ---------------------------------------------------------------------------------------------
 // Glasses. Lenses centred on the eyes at (76, 101) and (124, 101).
@@ -15,14 +14,17 @@ const stroke = (color: string, width: number) =>
     strokeLinejoin: 'round',
   }) as const;
 
-/** Frames keep the ink outline of everything else, with the frame colour inside it. */
-const frame = (p: Paint, d: string) =>
+/**
+ * Frames keep the ink outline of everything else, with the frame colour inside it. Black frames are
+ * one solid line instead (black inside a black outline would just look thicker).
+ */
+const frame = (p: Paint, d: string, outline = 6.6, inner = 3, solid = 4.2) =>
   p.glasses === INK ? (
-    <path d={d} {...stroke(INK, 4.2)} />
+    <path d={d} {...stroke(INK, solid)} />
   ) : (
     <g>
-      <path d={d} {...stroke(INK, 6.6)} />
-      <path d={d} {...stroke(p.glasses, 3)} />
+      <path d={d} {...stroke(INK, outline)} />
+      <path d={d} {...stroke(p.glasses, inner)} />
     </g>
   );
 
@@ -44,8 +46,6 @@ const shadeLens = (cx: number) =>
   `M${cx - 14} 92 H${cx + 14} C${cx + 14} 104 ${cx + 9} 111 ${cx} 111 C${cx - 9} 111 ${cx - 14} 104 ${cx - 14} 92 Z`;
 const CAT_LEFT =
   'M89 97 C89 106 83 111 76 111 C68.5 111 63 106 63 99 C63 95 61 91 56.5 87.5 C66 87.5 72 90 78 90 C85 90 89 92 89 97 Z';
-
-const tint = (p: Paint, fallback: string) => (p.glasses === INK ? fallback : p.glasses);
 
 export const GLASSES = {
   none: { label: 'None' },
@@ -101,7 +101,7 @@ export const GLASSES = {
       <g>
         <path
           d={`${heartPath(76, 102, 13)} ${heartPath(124, 102, 13)}`}
-          fill={tint(p, '#f43f5e')}
+          fill={p.glasses}
           stroke={INK}
           strokeWidth={3.6}
           strokeLinejoin="round"
@@ -121,41 +121,43 @@ export const GLASSES = {
       <g>
         <path
           d={`${starPath(76, 102, 16, 0.55)} ${starPath(124, 102, 16, 0.55)}`}
-          fill={tint(p, '#fbbf24')}
+          fill={p.glasses}
           stroke={INK}
           strokeWidth={3.4}
           strokeLinejoin="round"
         />
+        <path d="M69 96.5 L72.5 95 M117 96.5 L120.5 95" {...stroke('#ffffff', 2.2)} opacity={0.7} />
         <path d={`M88.5 98 Q100 94 111.5 98 ${TEMPLES}`} {...stroke(INK, 4)} />
       </g>
     ),
   },
   '3d': {
     label: '3D glasses',
-    front: () => (
+    front: (p) => (
       <g>
         <path d={squareLens(76)} fill="#ef4444" opacity={0.75} />
         <path d={squareLens(124)} fill="#22d3ee" opacity={0.75} />
-        <path d={`${lenses(squareLens)} M90 98 H110 ${TEMPLES}`} {...stroke(INK, 7.6)} />
-        <path d={`${lenses(squareLens)} M90 98 H110 ${TEMPLES}`} {...stroke('#ffffff', 3.4)} />
+        {frame(p, `${lenses(squareLens)} M90 98 H110 ${TEMPLES}`, 7.6, 3.4, 5.4)}
       </g>
     ),
   },
   monocle: {
     label: 'Monocle',
     front: (p) => {
-      const color = tint(p, GOLD);
+      const chain = 'M135 110 C140 124 146 132 150 148';
       return (
         <g>
-          <path d="M135 110 C140 124 146 132 150 148" {...stroke(INK, 3.8)} />
-          <path
-            d="M135 110 C140 124 146 132 150 148"
-            {...stroke(color, 1.6)}
-            strokeDasharray="2.5 2"
-          />
+          {p.glasses === INK ? (
+            // A black chain is just its links: an outline round black links would read as a cord.
+            <path d={chain} {...stroke(INK, 2.4)} strokeDasharray="3 2.2" />
+          ) : (
+            <>
+              <path d={chain} {...stroke(INK, 3.8)} />
+              <path d={chain} {...stroke(p.glasses, 1.6)} strokeDasharray="2.5 2" />
+            </>
+          )}
           {glass(roundLens(124))}
-          <path d={roundLens(124)} {...stroke(INK, 7)} />
-          <path d={roundLens(124)} {...stroke(color, 3.4)} />
+          {frame(p, roundLens(124), 7, 3.4, 4.6)}
         </g>
       );
     },

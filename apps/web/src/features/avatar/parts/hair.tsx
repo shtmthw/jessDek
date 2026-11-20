@@ -237,6 +237,7 @@ export const HAIRS = {
   },
   afro: {
     label: 'Afro',
+    top: 6.9,
     back: (p) =>
       cloud(
         p.hair,
@@ -329,6 +330,7 @@ export const HAIRS = {
   },
   bun: {
     label: 'Bun',
+    top: 13,
     back: (p) => (
       <g>
         <circle cx={100} cy={30} r={17} fill={p.hair} {...outline} />
@@ -379,6 +381,7 @@ export const HAIRS = {
   },
   mohawk: {
     label: 'Mohawk',
+    top: 11,
     front: (p) => (
       <g>
         <path
@@ -776,6 +779,7 @@ export const HAIRS = {
   },
   'messy-bun': {
     label: 'Messy bun',
+    top: 13,
     back: (p) => (
       <g>
         <path d={CROWN_BACK} fill={p.hair} {...outline} />
@@ -797,6 +801,7 @@ export const HAIRS = {
   },
   tousled: {
     label: 'Tousled',
+    top: 14,
     front: (p) => (
       <g>
         <path d="M104 34 C104 24 110 17 118 14 C113 21 112 27 113 33" fill={p.hair} {...outline} />

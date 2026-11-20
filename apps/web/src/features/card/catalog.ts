@@ -176,12 +176,6 @@ export const FRAMES: readonly Option[] = [
   { id: 'stamp', label: 'Stamp' },
 ];
 
-export const FRAME_BGS: readonly Option[] = [
-  { id: 'avatar', label: 'My avatar color' },
-  { id: 'accent', label: 'Accent' },
-  { id: 'card', label: 'Card' },
-];
-
 export const RINGS: readonly Option[] = [
   { id: 'none', label: 'None' },
   { id: 'thin', label: 'Thin' },
@@ -341,7 +335,6 @@ export const STYLE_OPTIONS = {
   corners: CORNERS,
   finish: FINISHES,
   frame: FRAMES,
-  frameBg: FRAME_BGS,
   ring: RINGS,
   divider: DIVIDERS,
   chips: CHIPS,

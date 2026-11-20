@@ -204,8 +204,13 @@ export function SettingsPage() {
               <p className="truncate text-[17px] font-semibold tracking-tight">
                 {displayName.trim() || viewer.username}
               </p>
-              <p className="truncate text-sm text-muted-foreground">
-                @{viewer.username} · {viewer.email}
+              {/* One line where there's room; on a phone the email gets its own, so it isn't cut short. */}
+              <p className="text-sm text-muted-foreground sm:truncate">
+                <span className="block truncate sm:inline">@{viewer.username}</span>
+                <span aria-hidden className="hidden sm:inline">
+                  {' · '}
+                </span>
+                <span className="block truncate sm:inline">{viewer.email}</span>
               </p>
             </div>
             <Link to="/settings/avatar" className={buttonClass('secondary', 'sm')}>

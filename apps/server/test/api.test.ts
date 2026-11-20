@@ -28,6 +28,36 @@ async function twoUsers() {
   return { a, b };
 }
 
+describe('welcome', () => {
+  const ME = `{ me { welcomed } }`;
+  const DISMISS = `mutation { dismissWelcome { welcomed } }`;
+
+  it('is shown to a new account once, on every device', async () => {
+    const c = new Client(app);
+    await signUp(c, 'newbie');
+    expect((await c.gql(ME)).data!.me).toEqual({ welcomed: false });
+
+    expect((await c.gql(DISMISS)).data!.dismissWelcome).toEqual({ welcomed: true });
+    // Signing in again (another device) doesn't bring it back, and a second dismiss is harmless.
+    const other = new Client(app);
+    await other.gql(`mutation($i: SignInInput!) { signIn(input: $i) { id } }`, {
+      i: { identifier: 'newbie', password: 'test-password-1' },
+    });
+    expect((await other.gql(ME)).data!.me).toEqual({ welcomed: true });
+    const first = (await prisma.user.findUniqueOrThrow({ where: { username: 'newbie' } }))
+      .welcomedAt;
+    await other.gql(DISMISS);
+    const again = (await prisma.user.findUniqueOrThrow({ where: { username: 'newbie' } }))
+      .welcomedAt;
+    expect(again).toEqual(first);
+  });
+
+  it('needs a signed-in user', async () => {
+    const res = await new Client(app).gql(DISMISS);
+    expect(res.errors?.[0]?.extensions?.code).toBe('UNAUTHENTICATED');
+  });
+});
+
 describe('auth', () => {
   it('signs up, sets an httpOnly cookie and identifies the viewer', async () => {
     const c = new Client(app);
@@ -37,7 +67,7 @@ describe('auth', () => {
       headers: { 'content-type': 'application/json' },
       payload: {
         query: `mutation($i: SignUpInput!) { signUp(input: $i) { username displayName } }`,
-        variables: { i: { username: 'Alice', email: 'a@test.dev', password: 'password123' } },
+        variables: { i: { username: 'Alice', email: 'a@test.dev', password: 'test-password-1' } },
       },
     });
     const cookie = String(res.headers['set-cookie']);
@@ -61,7 +91,7 @@ describe('auth', () => {
   it('validates input with field-level errors', async () => {
     const c = new Client(app);
     const bad = await c.gql(`mutation($i: SignUpInput!) { signUp(input: $i) { id } }`, {
-      i: { username: 'a!', email: 'x@test.dev', password: 'password123' },
+      i: { username: 'a!', email: 'x@test.dev', password: 'test-password-1' },
     });
     expect(bad.errors![0]!.extensions).toMatchObject({ code: 'BAD_USER_INPUT', field: 'username' });
 
@@ -78,11 +108,11 @@ describe('auth', () => {
     await signUp(new Client(app), 'alice');
     const c = new Client(app);
     const dupName = await c.gql(`mutation($i: SignUpInput!) { signUp(input: $i) { id } }`, {
-      i: { username: 'ALICE', email: 'other@test.dev', password: 'password123' },
+      i: { username: 'ALICE', email: 'other@test.dev', password: 'test-password-1' },
     });
     expect(dupName.errors![0]!.extensions).toMatchObject({ code: 'CONFLICT', field: 'username' });
     const dupEmail = await c.gql(`mutation($i: SignUpInput!) { signUp(input: $i) { id } }`, {
-      i: { username: 'someone', email: 'alice@test.dev', password: 'password123' },
+      i: { username: 'someone', email: 'alice@test.dev', password: 'test-password-1' },
     });
     expect(dupEmail.errors![0]!.extensions).toMatchObject({ code: 'CONFLICT', field: 'email' });
   });
@@ -96,19 +126,22 @@ describe('auth', () => {
     });
     expect(wrong.errors![0]!.extensions!.code).toBe('UNAUTHENTICATED');
     const nobody = await new Client(app).gql(SIGN_IN, {
-      i: { identifier: 'ghost', password: 'password123' },
+      i: { identifier: 'ghost', password: 'test-password-1' },
     });
     expect(nobody.errors![0]!.message).toBe(wrong.errors![0]!.message); // no user enumeration
 
     const byName = new Client(app);
     expect(
-      (await byName.gql(SIGN_IN, { i: { identifier: 'Alice', password: 'password123' } })).data!
+      (await byName.gql(SIGN_IN, { i: { identifier: 'Alice', password: 'test-password-1' } })).data!
         .signIn,
     ).toEqual({ username: 'alice' });
     const byEmail = new Client(app);
     expect(
-      (await byEmail.gql(SIGN_IN, { i: { identifier: 'alice@test.dev', password: 'password123' } }))
-        .errors,
+      (
+        await byEmail.gql(SIGN_IN, {
+          i: { identifier: 'alice@test.dev', password: 'test-password-1' },
+        })
+      ).errors,
     ).toBeUndefined();
 
     expect((await byName.gql(`{ me { id } }`)).data!.me).not.toBeNull();
@@ -122,7 +155,9 @@ describe('auth', () => {
     const SIGN_IN = `mutation($i: SignInInput!) { signIn(input: $i) { id } }`;
     for (let i = 0; i < 10; i++)
       await c.gql(SIGN_IN, { i: { identifier: 'alice', password: 'wrong-wrong' } });
-    const blocked = await c.gql(SIGN_IN, { i: { identifier: 'alice', password: 'password123' } });
+    const blocked = await c.gql(SIGN_IN, {
+      i: { identifier: 'alice', password: 'test-password-1' },
+    });
     expect(blocked.errors![0]!.extensions!.code).toBe('RATE_LIMITED');
   });
 

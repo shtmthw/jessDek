@@ -1,23 +1,57 @@
 import { Link2, Pencil, Share } from 'lucide-react';
-import { motion } from 'motion/react';
+import { motion, useReducedMotion } from 'motion/react';
+import { useState } from 'react';
 import { Link } from 'react-router';
 import { Button, buttonClass } from '@/components/Button';
 import { Dialog } from '@/components/Dialog';
 import { Skeleton } from '@/components/Skeleton';
+import { easeOut } from '@/lib/motion';
+import { useCardFontGate } from './fonts';
 import { CardView, type CardUser } from './CardView';
 import type { CardRecipe } from './recipe';
 import { copyCardLink, shareCard } from './share';
 
-/** Room left for the card in a dialog: the sheet's height minus its title and the actions. */
-const CARD_WIDTH = 'min(320px, 100%, calc((88dvh - 12rem) * 320 / 540))';
+/** Room left for the card in a dialog: the sheet's height minus its title, the room the card
+ * leans into, and the actions. */
+const CARD_WIDTH = 'min(320px, 100%, calc((88dvh - 13rem) * 320 / 540))';
 
-/** The card arrives with a little toss, then settles. */
+/** Ends a touch past the mark and eases back, like a spring, but always on the same frame. */
+const settleBack = [0.3, 1.45, 0.55, 1] as const;
+
+/**
+ * The card arrives with a little toss, then settles.
+ *
+ * Timed curves rather than springs: a spring's tail creeps the last pixel for a few hundred ms and
+ * then snaps its last half degree of turn, which reads as a shiver along the card's edges. No scale
+ * either: the card's tilt layer is drawn once at the size it first appears, so starting it small
+ * left it soft. It's its own layer only while it moves.
+ */
 export function DealtCard({ children }: { children: React.ReactNode }) {
+  const reduced = useReducedMotion() ?? false;
+  const [moving, setMoving] = useState(!reduced);
+  if (reduced) {
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.2, ease: 'easeOut' }}
+      >
+        {children}
+      </motion.div>
+    );
+  }
   return (
     <motion.div
-      initial={{ opacity: 0, y: 18, rotate: -5, scale: 0.92 }}
-      animate={{ opacity: 1, y: 0, rotate: 0, scale: 1 }}
-      transition={{ type: 'spring', visualDuration: 0.5, bounce: 0.32, delay: 0.04 }}
+      initial={{ opacity: 0, y: 22, rotate: -4 }}
+      animate={{ opacity: 1, y: 0, rotate: 0 }}
+      transition={{
+        delay: 0.04,
+        opacity: { duration: 0.18, ease: 'easeOut' },
+        y: { duration: 0.5, ease: easeOut },
+        rotate: { duration: 0.62, ease: settleBack },
+      }}
+      style={moving ? { willChange: 'transform' } : undefined}
+      onAnimationComplete={() => setMoving(false)}
     >
       {children}
     </motion.div>
@@ -58,11 +92,14 @@ export function CardDialog({
     : own
       ? 'Your card'
       : `${user.displayName}’s card`;
+  // Deal the card once its font is here, so its text doesn't reflow mid-toss.
+  const fontReady = useCardFontGate(card?.font);
   return (
     <Dialog open={open} onOpenChange={onOpenChange} title={title}>
-      <div className="flex flex-col items-center gap-5 pb-1 pt-1">
+      {/* The padding is room for the card to lean into and for stickers that hang off its edge. */}
+      <div className="flex flex-col items-center gap-6 pb-1 pt-4">
         <div style={{ width: CARD_WIDTH }}>
-          {card === undefined ? (
+          {card === undefined || (card && !fontReady) ? (
             <Skeleton className="aspect-[320/540] w-full rounded-2xl" />
           ) : card === null ? (
             <div className="flex aspect-[320/540] w-full flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border px-8 text-center">

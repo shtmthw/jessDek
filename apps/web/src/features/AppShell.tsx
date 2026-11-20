@@ -63,6 +63,11 @@ import {
   SignedInCardPage,
 } from './card/lazy';
 
+/** Only new accounts ever see it, so it loads on demand. */
+const WelcomeDialog = lazy(() =>
+  import('./welcome/WelcomeDialog').then((m) => ({ default: m.WelcomeDialog })),
+);
+
 const SWIPE_EDGE_PX = 28;
 
 // Visual-QA pages for every photo and video state and every avatar item. Dev builds only; production drops them.
@@ -251,6 +256,9 @@ export function AppShell() {
   const openNewChat = () => setNewChatOpen(true);
   usePendingChat();
   useEffect(prefetchScreens, []);
+  // A new account gets the one-time welcome. Decided once: closing it saves that it was seen,
+  // and the dialog plays its way out instead of vanishing when the saved flag comes back.
+  const [welcome] = useState(() => !viewer.welcomed);
   // Going somewhere else (e.g. Message on someone's card opened from New chat) closes New chat,
   // so it doesn't sit on top of the chat that just opened.
   useEffect(() => setNewChatOpen(false), [location.pathname]);
@@ -427,6 +435,11 @@ export function AppShell() {
 
       <ConnectionBanner />
       <NewChatDialog open={newChatOpen} onOpenChange={setNewChatOpen} />
+      {welcome ? (
+        <Suspense fallback={null}>
+          <WelcomeDialog />
+        </Suspense>
+      ) : null}
     </div>
   );
 }

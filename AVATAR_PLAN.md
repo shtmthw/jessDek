@@ -179,8 +179,26 @@ style: thin lines, doe eyes, tiny mouths and pale skin with a faint blush. They 
   the round pendant from the reference. Randomize keeps the build, like the line weight.
 - **Fix found on the way:** the sweater's ribbed collar poked past the shoulder line; it is now
   clipped to the body (all avatars).
-- **Server:** no change. Recipes now have 29 keys (the limit is 32) and stay well under 1 KiB.
-  `specials.test.tsx` checks every special against the server's rules.
+- **One neck for everyone (2026-11-20):** the classic build now has the specials' slender, longer
+  neck too, at the user's request. Both builds lower the body under it (`CLASSIC_BODY`,
+  `SLIM_BODY`); slim is still a little narrower. The flare at the base of the neck meets each
+  build's own collar, and chokers are narrowed to the neck on the wider classic body
+  (`NECK_HUG`). Bare-shoulder tops, the print tee's text and both chokers lost their old
+  short-neck versions.
+  - The figure's 7-unit lift is now adaptive (`liftFor`): tall hair or headwear (the items with a
+    `top`) gets back the headroom it had before the lift, so a bun, top hat or crown is never cut
+    off by the circle more than it used to be.
+  - Pets sit 7 units further up and in along the shoulder (`PET_LIFT`), so the lowered shoulders
+    don't push them out of the frame.
+  - Studio tiles framed on the head (`anchor="head"`) follow it wherever the lift puts it.
+  - `/dev/specials?slot=top&build=classic` redraws every row on the default (classic) build.
+- **Fine lines for everyone (2026-11-20):** the Bold/Fine choice and the `line` slot are gone; every
+  avatar is drawn with the specials' fine lines (a stored `line` is ignored). The weight now
+  follows the size an avatar is shown at (`lineScale`): ×0.4 at studio and card sizes, thinning
+  less below that so an outline never drops under 0.9 CSS px, which keeps chat-list faces crisp on
+  1× screens. This replaces the fixed ×0.7 for the close-up view.
+- **Server:** no change. Recipes have 28 keys since `line` went (the limit is 32) and stay well
+  under 1 KiB. `specials.test.tsx` checks every special against the server's rules.
 
 ## 5. Server
 

@@ -71,6 +71,8 @@ export const resolvers = {
 
     updateCard: (_: unknown, { input }: { input: unknown }, ctx: Context) =>
       cards.updateCard(requireUser(ctx), input),
+    dismissWelcome: (_: unknown, __: unknown, ctx: Context) =>
+      users.dismissWelcome(requireUser(ctx)),
 
     startDirect: (_: unknown, { username }: { username: string }, ctx: Context) =>
       conversations.startDirect(requireUser(ctx), username),
@@ -160,6 +162,10 @@ export const resolvers = {
 
   PresenceChanged: {
     lastSeenAt: (e: { lastSeenAt: Date | null }) => (e.lastSeenAt ? iso(e.lastSeenAt) : null),
+  },
+
+  Viewer: {
+    welcomed: (u: { welcomedAt: Date | null }) => u.welcomedAt !== null,
   },
 
   User: {

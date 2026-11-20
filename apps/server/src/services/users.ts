@@ -170,6 +170,15 @@ export async function updateProfile(userId: string, input: unknown): Promise<Use
   return prisma.user.update({ where: { id: userId }, data });
 }
 
+/** The one-time welcome has been seen. Only the first time counts. */
+export async function dismissWelcome(userId: string): Promise<User> {
+  await prisma.user.updateMany({
+    where: { id: userId, welcomedAt: null },
+    data: { welcomedAt: new Date() },
+  });
+  return prisma.user.findUniqueOrThrow({ where: { id: userId } });
+}
+
 export async function updateAvatar(userId: string, input: unknown): Promise<User> {
   const src = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
   const avatarColor = parseInput(avatarColorSchema, src.avatarColor, 'avatarColor');

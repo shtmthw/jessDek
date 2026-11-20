@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { signUp, unique } from './helpers';
+import { closeWelcome, signUp, unique } from './helpers';
 
 async function openCardStudio(page: Page) {
   await page.getByRole('link', { name: /@/ }).first().click();
@@ -68,8 +68,9 @@ test('designs a card, saves it, shares the link, and a visitor messages through 
   await visitor.getByRole('tab', { name: 'Sign up' }).click();
   await visitor.getByLabel('Username').fill(fan);
   await visitor.getByLabel('Email').fill(`${fan}@example.com`);
-  await visitor.getByLabel('Password', { exact: true }).fill('password123');
+  await visitor.getByLabel('Password', { exact: true }).fill('test-password-1');
   await visitor.getByRole('button', { name: 'Create account' }).click();
+  await closeWelcome(visitor);
   await expect(visitor).toHaveURL(/\/c\//);
   await expect(visitor.getByRole('heading', { name: owner, exact: true })).toBeVisible();
   await visitorContext.close();

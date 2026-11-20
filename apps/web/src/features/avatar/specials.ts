@@ -10,10 +10,9 @@ export interface Special {
   recipe: Recipe;
 }
 
-/** What every special shares: fine lines, pale skin, the mochi face, blush, no nose. */
+/** What every special shares: the slim build, pale skin, the mochi face, doe eyes, no nose. */
 const BASE: Partial<Recipe> = {
   style: 'character',
-  line: 'fine',
   build: 'slim',
   skin: 'ivory',
   face: 'mochi',

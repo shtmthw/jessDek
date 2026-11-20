@@ -1,5 +1,5 @@
-import { memo, useId, useLayoutEffect, useMemo, useRef } from 'react';
-import type { Item, Paint } from './art';
+import { memo, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { SW, type Item, type Paint } from './art';
 import { luminance, mix } from './color';
 import { colorOf, EYE_COLORS, GLASSES_COLORS, HAIR_COLORS, ITEM_COLORS, SKINS } from './palettes';
 import { CLIPS, EARRINGS, GLASSES } from './parts/accessories';
@@ -14,7 +14,7 @@ import {
   MOUTHS,
   Neck,
   NOSES,
-  SLIM_BODY,
+  bodyOf,
   type FaceId,
 } from './parts/face';
 import { HAIRS } from './parts/hair';
@@ -24,6 +24,33 @@ import type { Recipe } from './recipe';
 
 const NOTHING: Item = { label: '' };
 const item = (map: Record<string, Item>, id: string): Item => map[id] ?? NOTHING;
+
+/**
+ * Pets ride up the shoulder towards the neck (the shoulder rises about as fast as it comes in
+ * there), so on the lowered shoulders they still sit on it but aren't cut off by the circle.
+ */
+const PET_LIFT = 'translate(7 -7)';
+
+/** How far up the figure moves, so the shoulders under the long neck stay in frame. */
+const LIFT = 7;
+/** The highest a figure may reach once moved: the frame's top (y 8) plus room for the outline. */
+const HEADROOM = 12;
+
+/**
+ * The figure sits `LIFT` higher, except as far as tall hair or headwear needs room above it: then
+ * it moves up only as much as keeps that in the frame (no higher than before it was lifted).
+ */
+export function liftFor(hair: Item, hat: Item): number {
+  const top = Math.min(hair.top ?? Infinity, hat.top ?? Infinity);
+  return Math.min(LIFT, Math.max(0, top - HEADROOM));
+}
+
+/** The same viewBox moved down by `dy`. */
+const moveView = (view: string, dy: number) => {
+  if (!dy) return view;
+  const [x, y, w, h] = view.split(/\s+/).map(Number);
+  return `${x} ${y! + dy} ${w} ${h}`;
+};
 
 export function paintFor(r: Recipe, uid: string): Paint {
   const skin = colorOf(SKINS, r.skin);
@@ -77,22 +104,41 @@ export const VIEW_AVATAR = '10 8 180 180';
 export const VIEW_CLOSE = '20 22 160 160';
 
 /**
- * The "fine" line weight draws every outline thinner. Parts are all drawn at the bold weight, so
- * one pass over the rendered strokes scales them, whatever item they belong to. Tiny avatars keep
- * a little more weight so the face still reads.
+ * Every avatar is drawn with fine lines. The parts are drawn at a heavier weight, so one pass over
+ * the rendered strokes scales them, whatever item they belong to.
+ *
+ * How much depends on the size it's shown at: `FINE` at studio and card sizes, and less thinning
+ * as it gets small, so an outline never drops under `MIN_PX` and a chat-list face still reads.
  */
 const FINE = 0.4;
-const FINE_SMALL = 0.7;
+const MIN_PX = 0.9;
 
-function useLineWeight(svg: React.RefObject<SVGSVGElement | null>, scale: number, recipe: Recipe) {
+/** The stroke scale for an avatar `px` CSS pixels wide showing `viewW` units of the drawing. */
+export function lineScale(px: number, viewW: number): number {
+  if (!(px > 0)) return FINE;
+  return Math.min(1, Math.max(FINE, (MIN_PX * viewW) / (SW * px)));
+}
+
+function useLineWeight(svg: React.RefObject<SVGSVGElement | null>, viewW: number, recipe: Recipe) {
+  // The size it's drawn at (layout size, so a dialog scaling in doesn't change the lines).
+  const [px, setPx] = useState(0);
+  useLayoutEffect(() => {
+    const el = svg.current;
+    if (!el) return;
+    setPx(Math.round(el.clientWidth || el.getBoundingClientRect().width));
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(([entry]) => {
+      if (entry) setPx(Math.round(entry.contentRect.width));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [svg]);
+
+  const scale = Math.round(lineScale(px, viewW) * 100) / 100;
   useLayoutEffect(() => {
     const el = svg.current;
     if (!el) return;
     el.querySelectorAll<SVGElement>('[stroke-width]').forEach((node) => {
-      if (scale === 1) {
-        node.style.strokeWidth = '';
-        return;
-      }
       const w = Number.parseFloat(node.getAttribute('stroke-width') ?? '');
       if (Number.isFinite(w)) node.style.strokeWidth = `${Math.round(w * scale * 100) / 100}px`;
     });
@@ -108,33 +154,37 @@ export const AvatarFigure = memo(function AvatarFigure({
   viewBox = VIEW_FULL,
   className,
   box,
+  anchor = 'figure',
 }: {
   recipe: Recipe;
   viewBox?: string;
   className?: string;
+  /**
+   * `head`: the viewBox frames the head (a studio tile for a hat, glasses, eyes...) and follows
+   * it, wherever the lift for tall hair or headwear puts it. Default: it frames the whole figure.
+   */
+  anchor?: 'figure' | 'head';
   /** Position and size when nested inside another SVG (the card's avatar frame). */
   box?: { x: number; y: number; width: number; height: number };
 }) {
   const uid = `av${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
   const p = useMemo(() => paintFor(recipe, uid), [recipe, uid]);
   const svg = useRef<SVGSVGElement>(null);
-  useLineWeight(
-    svg,
-    recipe.line === 'fine' ? (viewBox === VIEW_CLOSE ? FINE_SMALL : FINE) : 1,
-    recipe,
-  );
+  useLineWeight(svg, Number(viewBox.split(/\s+/)[2]) || 200, recipe);
   const hat: HatItem = (HATS as Record<string, HatItem>)[recipe.hat] ?? NOTHING;
   const hair = item(HAIRS, recipe.hair);
   const top = item(TOPS, recipe.top);
   const pet = item(PETS, recipe.pet);
   const clipId = hat.clip ? `${uid}-hat` : undefined;
   const slim = recipe.build === 'slim';
+  const body = bodyOf(slim);
+  const lift = liftFor(hair, hat);
   const clip = clipId ? `url(#${clipId})` : undefined;
 
   return (
     <svg
       ref={svg}
-      viewBox={viewBox}
+      viewBox={anchor === 'head' ? moveView(viewBox, -lift) : viewBox}
       className={className}
       {...box}
       xmlns="http://www.w3.org/2000/svg"
@@ -148,16 +198,15 @@ export const AvatarFigure = memo(function AvatarFigure({
           </clipPath>
         </defs>
       ) : null}
-      {/* The slim build sits a little higher, so its lowered shoulders and necklaces stay in frame. */}
-      <g transform={slim ? 'translate(0 -7)' : undefined}>
+      {/* The figure sits a little higher, so the lowered shoulders and necklaces stay in frame. */}
+      <g transform={lift ? `translate(0 ${-lift})` : undefined}>
         <g clipPath={clip}>{hair.back?.(p)}</g>
         {hat.back?.(p)}
-        {slim ? <Neck p={p} slim /> : null}
-        {/* The slim build lowers and narrows everything below the neck. */}
-        <g transform={slim ? SLIM_BODY : undefined}>
-          {pet.back?.(p)}
+        <Neck p={p} slim={slim} />
+        {/* Everything below the neck sits lower, under the long neck (and narrower when slim). */}
+        <g transform={body}>
+          <g transform={PET_LIFT}>{pet.back?.(p)}</g>
           {top.back?.(p)}
-          {slim ? null : <Neck p={p} />}
           {top.front?.(p)}
           {item(NECKS, recipe.neck).front?.(p)}
         </g>
@@ -175,7 +224,9 @@ export const AvatarFigure = memo(function AvatarFigure({
         {item(CLIPS, recipe.clip).front?.(p)}
         {item(GLASSES, recipe.glasses).front?.(p)}
         {hat.front?.(p)}
-        <g transform={slim ? SLIM_BODY : undefined}>{pet.front?.(p)}</g>
+        <g transform={body}>
+          <g transform={PET_LIFT}>{pet.front?.(p)}</g>
+        </g>
       </g>
     </svg>
   );

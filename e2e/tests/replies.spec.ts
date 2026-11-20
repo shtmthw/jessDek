@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { createGroup, newUser, send, startDirect, unique } from './helpers';
+import { closeWelcome, createGroup, newUser, send, startDirect, unique } from './helpers';
 
 const log = (page: Page) => page.getByRole('log', { name: 'Messages' });
 /** A message's row (bubble, chips and toolbar) by its text. */
@@ -87,8 +87,9 @@ test('on a phone, a long-press opens the reaction bar', async ({ browser }) => {
   await phone.getByRole('tab', { name: 'Sign up' }).click();
   await phone.getByLabel('Username').fill(name);
   await phone.getByLabel('Email').fill(`${name}@example.com`);
-  await phone.getByLabel('Password', { exact: true }).fill('password123');
+  await phone.getByLabel('Password', { exact: true }).fill('test-password-1');
   await phone.getByRole('button', { name: 'Create account' }).click();
+  await closeWelcome(phone);
   await expect(phone.getByRole('heading', { name: 'Chats' })).toBeVisible();
 
   await startDirect(a.page, name);

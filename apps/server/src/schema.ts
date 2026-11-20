@@ -52,6 +52,8 @@ export const typeDefs = /* GraphQL */ `
     updateAvatar(input: UpdateAvatarInput!): Viewer!
     "Saves your card and/or whether its link works for people who aren't signed in."
     updateCard(input: UpdateCardInput!): Card!
+    "Marks the one-time welcome as seen, on every device."
+    dismissWelcome: Viewer!
 
     startDirect(username: String!): Conversation!
     createGroup(name: String!, usernames: [String!]!): Conversation!
@@ -143,6 +145,8 @@ export const typeDefs = /* GraphQL */ `
     avatarColor: String!
     "Avatar recipe (JSON). Null means the default character."
     avatar: String
+    "False until a new account closes the one-time welcome."
+    welcomed: Boolean!
   }
 
   type User {

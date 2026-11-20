@@ -22,6 +22,8 @@ export interface Viewer {
   avatarColor: string;
   /** The avatar recipe (JSON). Null: the default character. */
   avatar: string | null;
+  /** False until a new account closes the one-time welcome. */
+  welcomed: boolean;
 }
 export type AttachmentKind = 'IMAGE' | 'VIDEO';
 export type MediaPart = 'FILE' | 'POSTER';
@@ -314,6 +316,7 @@ const VIEWER_FIELDS = gql`
     email
     avatarColor
     avatar
+    welcomed
   }
 `;
 
@@ -408,6 +411,15 @@ export const UPDATE_AVATAR: Doc<
 > = gql`
   mutation UpdateAvatar($input: UpdateAvatarInput!) {
     updateAvatar(input: $input) {
+      ...ViewerFields
+    }
+  }
+  ${VIEWER_FIELDS}
+`;
+
+export const DISMISS_WELCOME: Doc<{ dismissWelcome: Viewer }> = gql`
+  mutation DismissWelcome {
+    dismissWelcome {
       ...ViewerFields
     }
   }

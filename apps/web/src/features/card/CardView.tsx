@@ -525,6 +525,11 @@ export function PlacedSticker({
   );
 }
 
+/** Borders that sit solid on the card's outer edge (see `flush` in `CardFace`). */
+const FLUSH_BORDERS = new Set(['thin', 'thick', 'double', 'frame', 'foil']);
+/** How far inside a flush border's outer edge the face stops (layout px). */
+const TRIM = 1;
+
 /** The card face at its layout size (320 × 540). `CardView` scales it. */
 export const CardFace = memo(function CardFace({
   card,
@@ -554,6 +559,11 @@ export const CardFace = memo(function CardFace({
     </div>
   );
 
+  // A border drawn right on the card's outer edge, with the face's own edge under it: both are
+  // smoothed at the same pixels and the face's colour leaks past the border as a thin halo at the
+  // corners. So the face is trimmed a hair inside the border's outer edge, and the border is drawn
+  // outside that trim.
+  const flush = FLUSH_BORDERS.has(card.border);
   return (
     <div className="relative" style={{ width: CARD_W, height: CARD_H }}>
       <article
@@ -565,6 +575,9 @@ export const CardFace = memo(function CardFace({
           color: theme.ink,
           fontFamily: f.family,
           boxShadow: faceShadow(card.border, theme),
+          clipPath: flush
+            ? `inset(${TRIM}px round ${Math.max(0, theme.radius - TRIM)}px)`
+            : undefined,
           ...faceMask(card.border),
         }}
       >
@@ -591,8 +604,13 @@ export const CardFace = memo(function CardFace({
           />
         </div>
         <FinishLayer kind={card.finish} theme={theme} />
-        <BorderLayer kind={card.border} theme={theme} width={CARD_W} height={CARD_H} />
+        {flush ? null : (
+          <BorderLayer kind={card.border} theme={theme} width={CARD_W} height={CARD_H} />
+        )}
       </article>
+      {flush ? (
+        <BorderLayer kind={card.border} theme={theme} width={CARD_W} height={CARD_H} />
+      ) : null}
       {hideStickers
         ? null
         : card.stickers.map((s, i) => <PlacedSticker key={`${i}:${s.k ?? s.e}`} sticker={s} />)}
@@ -620,6 +638,13 @@ function useWidth<T extends HTMLElement>(fixed?: number) {
 }
 
 const MAX_TILT = 9;
+/*
+ * Springs for the lean. The pointer position runs 0–1, so motion's default rest threshold (0.01)
+ * would let the card stop up to 0.2° short and then jump flat: a small hop along its edges.
+ */
+const REST = { restDelta: 0.0005, restSpeed: 0.005 } as const;
+const LEAN = { stiffness: 220, damping: 22, mass: 0.6, ...REST } as const;
+const SETTLE = { type: 'spring', visualDuration: 0.5, bounce: 0.3, ...REST } as const;
 
 /**
  * A card, scaled to `width` (or to fill its container's width) with the layout unchanged.
@@ -671,8 +696,8 @@ export function CardView({
   // Pointer position over the card, 0–1. Springs give the lean a little weight.
   const px = useMotionValue(0.5);
   const py = useMotionValue(0.5);
-  const sx = useSpring(px, { stiffness: 220, damping: 22, mass: 0.6 });
-  const sy = useSpring(py, { stiffness: 220, damping: 22, mass: 0.6 });
+  const sx = useSpring(px, LEAN);
+  const sy = useSpring(py, LEAN);
   const rotateY = useTransform(sx, [0, 1], [-MAX_TILT, MAX_TILT]);
   const rotateX = useTransform(sy, [0, 1], [MAX_TILT, -MAX_TILT]);
   const mx = useTransform(sx, (v) => `${(v * 100).toFixed(1)}%`);
@@ -685,12 +710,16 @@ export function CardView({
   const track = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (!canTilt || e.pointerType !== 'mouse' || !ref.current) return;
     const r = ref.current.getBoundingClientRect();
+    // Back on the card before it finished settling: stop that, or it keeps pulling the card back
+    // to flat against the pointer and the card shudders.
+    px.stop();
+    py.stop();
     px.set(Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)));
     py.set(Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)));
   };
   const settle = () => {
-    animate(px, 0.5, { type: 'spring', visualDuration: 0.5, bounce: 0.3 });
-    animate(py, 0.5, { type: 'spring', visualDuration: 0.5, bounce: 0.3 });
+    animate(px, 0.5, SETTLE);
+    animate(py, 0.5, SETTLE);
   };
 
   return (

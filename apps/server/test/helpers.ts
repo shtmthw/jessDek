@@ -67,7 +67,7 @@ export class Client {
 export async function signUp(client: Client, username: string, extra: Record<string, string> = {}) {
   const res = await client.gql(
     `mutation($input: SignUpInput!) { signUp(input: $input) { id username displayName } }`,
-    { input: { username, email: `${username}@test.dev`, password: 'password123', ...extra } },
+    { input: { username, email: `${username}@test.dev`, password: 'test-password-1', ...extra } },
   );
   if (res.errors) throw new Error(res.errors[0]!.message);
   return res.data!.signUp as { id: string; username: string; displayName: string };

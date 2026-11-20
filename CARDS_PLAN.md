@@ -359,3 +359,12 @@ Phases 3–5 (Opus at medium effort, 2026-11-19; the user chose to stay on Opus)
   card fed its own rotation back in), turns as one GPU layer (`will-change: transform`) so text
   doesn't shimmer, keeps its shadow on the wrapper, and only passes the light position to finishes
   that use it (gloss, holographic, foil).
+- **No "Behind your avatar" option (2026-11-20):** the avatar on a card always sits on the person's
+  own avatar colour, so it looks the same as everywhere else. The option (avatar colour / accent /
+  card) was removed after the shuffle button kept setting it to something else; a stored `frameBg`
+  is ignored when a card is read.
+- **Jitter pass (2026-11-20):** the dealt-in card uses timed curves that land on one frame (a spring
+  snapped its last half degree of turn) and no longer scales; flush borders are drawn outside the
+  face, which is clipped 1 px inside them (no colour halo at the corners); the dialog only clips
+  while its height animates; leaving and re-entering stops the settle animation; and a card waits
+  up to 700 ms for its font before it's dealt.

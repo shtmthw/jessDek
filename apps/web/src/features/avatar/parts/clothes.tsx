@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { DW, INK, outline, type Item, type Paint } from '../art';
 import { mix } from '../color';
+import { NECK_HUG } from './face';
 
 /** The shoulders every top is cut from. Runs off the bottom of the canvas. */
 const BODY = 'M28 240 C29 178 53 158 85 152.5 C90 161 110 161 115 152.5 C147 158 171 178 172 240 Z';
@@ -36,20 +37,22 @@ const clipped = (p: Paint, id: string, d: string, children: ReactNode) => (
   </g>
 );
 
-/** Bare shoulders. On the slim build the neck flows into them, so the neckline isn't drawn. */
-const skinBody = (p: Paint) =>
-  p.slim ? (
-    <g>
-      <path d={BODY} fill={p.skin} />
-      <path
-        d="M28 240 C29 178 53 158 85 152.5 M115 152.5 C147 158 171 178 172 240"
-        {...outline}
-        fill="none"
-      />
-    </g>
-  ) : (
-    <path d={BODY} fill={p.skin} {...outline} />
-  );
+/** Bare shoulders. The neck flows into them, so the neckline isn't drawn. */
+const skinBody = (p: Paint) => (
+  <g>
+    <path d={BODY} fill={p.skin} />
+    <path
+      d="M28 240 C29 178 53 158 85 152.5 M115 152.5 C147 158 171 178 172 240"
+      {...outline}
+      fill="none"
+    />
+  </g>
+);
+
+/** Things that hug the neck, drawn as on the slim build and narrowed to the neck on the classic. */
+const onNeck = (p: Paint, children: ReactNode) => (
+  <g transform={p.slim ? undefined : NECK_HUG}>{children}</g>
+);
 
 /** Skin showing through a V neckline. */
 const vSkin = (p: Paint) => <path d="M83 150 L100 179 L117 150 Z" fill={p.skin} />;
@@ -448,7 +451,7 @@ export const TOPS = {
         <path d="M87 157.5 C92.5 166 107.5 166 113 157.5" {...line(p.topShade)} />
         <text
           x={100}
-          y={p.slim ? 184 : 196}
+          y={184}
           textAnchor="middle"
           fontSize={29}
           fontWeight={900}
@@ -651,22 +654,21 @@ export const NECKS = {
   },
   choker: {
     label: 'Choker',
-    front: (p) => (
-      <g>
-        <path
-          d={p.slim ? 'M89.4 139.5 Q100 144 110.6 139.5' : 'M85.5 149 Q100 155 114.5 149'}
-          {...line(INK, 5)}
-        />
-        <path
-          transform={p.slim ? 'translate(0 -13)' : undefined}
-          d="M100 163 C99.4 162.4 95 160 95 157 C95 155 97.8 154 100 156.2 C102.2 154 105 155 105 157 C105 160 100.6 162.4 100 163 Z"
-          fill={p.neck}
-          stroke={INK}
-          strokeWidth={2}
-          strokeLinejoin="round"
-        />
-      </g>
-    ),
+    front: (p) =>
+      onNeck(
+        p,
+        <>
+          <path d="M89.4 139.5 Q100 144 110.6 139.5" {...line(INK, 5)} />
+          <path
+            transform="translate(0 -13)"
+            d="M100 163 C99.4 162.4 95 160 95 157 C95 155 97.8 154 100 156.2 C102.2 154 105 155 105 157 C105 160 100.6 162.4 100 163 Z"
+            fill={p.neck}
+            stroke={INK}
+            strokeWidth={2}
+            strokeLinejoin="round"
+          />
+        </>,
+      ),
   },
   lei: {
     label: 'Flower lei',
@@ -734,13 +736,12 @@ export const NECKS = {
   collar: {
     label: 'Buckle choker',
     front: (p) => {
-      // Classic: at the base of the neck, below even the longest chin. Slim: up on the longer
-      // neck, as in the specials' reference (drawn in the lowered body's coordinates; see SLIM_BODY).
-      const [band, y] = p.slim
-        ? (['M89.4 140.5 Q100 145 110.6 140.5', 139] as const)
-        : (['M84 151 Q100 160.5 116 151', 152] as const);
-      return (
-        <g>
+      // Up on the neck, as in the specials' reference (drawn in the lowered body's coordinates).
+      const band = 'M89.4 140.5 Q100 145 110.6 140.5';
+      const y = 139;
+      return onNeck(
+        p,
+        <>
           <path d={band} {...line(INK, 8)} />
           <path d={band} {...line(p.neck, 4.4)} />
           <rect
@@ -754,7 +755,7 @@ export const NECKS = {
             strokeWidth={1.8}
           />
           <rect x={98} y={y + 2.5} width={4} height={3.5} rx={0.6} fill={p.neck} />
-        </g>
+        </>,
       );
     },
   },

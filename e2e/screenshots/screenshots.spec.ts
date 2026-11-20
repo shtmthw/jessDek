@@ -24,7 +24,7 @@ async function signIn(
   const page = await context.newPage();
   await page.goto('/');
   await page.getByLabel('Username or email').fill(who);
-  await page.getByLabel('Password', { exact: true }).fill('password123');
+  await page.getByLabel('Password', { exact: true }).fill(process.env.SEED_PASSWORD!);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Chats' })).toBeVisible();
   return { context, page };

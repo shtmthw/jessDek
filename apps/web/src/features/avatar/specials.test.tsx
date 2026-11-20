@@ -1,8 +1,10 @@
 import { render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { AvatarFigure, VIEW_AVATAR } from './AvatarFigure';
+import { AvatarFigure, liftFor, lineScale, VIEW_AVATAR } from './AvatarFigure';
 import { SLOTS, slotIds, type SlotId } from './catalog';
-import { SLIM_BODY } from './parts/face';
+import { HAIRS } from './parts/hair';
+import { HATS } from './parts/hats';
+import { CLASSIC_BODY, SLIM_BODY } from './parts/face';
 import {
   DEFAULT_RECIPE,
   normalizeRecipe,
@@ -23,7 +25,6 @@ describe('specials', () => {
     for (const s of SPECIALS) {
       // Normalizing drops anything unknown, so a valid recipe comes back unchanged.
       expect(normalizeRecipe(s.recipe), s.id).toEqual(s.recipe);
-      expect(s.recipe.line).toBe('fine');
       expect(s.recipe.style).toBe('character');
     }
   });
@@ -52,29 +53,67 @@ describe('specials', () => {
 describe('new slots', () => {
   it('fill in for recipes saved before they existed', () => {
     const old = parseRecipe(JSON.stringify({ v: 1, style: 'character', hair: 'bob' }));
-    expect(old.line).toBe('bold');
     expect(old.clip).toBe('none');
     expect(old.earringColor).toBe('gold');
     expect(old.topAccent).toBe('jade');
     expect(old.build).toBe('classic');
   });
 
-  it('gives the specials the slim build, and Randomize keeps the build and line weight', () => {
+  it('gives the specials the slim build, and Randomize keeps the build', () => {
     expect(SPECIALS.every((s) => s.recipe.build === 'slim')).toBe(true);
     let seed = 7;
     const rand = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
     const r = randomRecipe(SPECIALS[0]!.recipe, rand);
     expect(r.build).toBe('slim');
-    expect(r.line).toBe('fine');
   });
 
-  it('lowers the body only on the slim build', () => {
+  it('lowers the body under the long neck on both builds, and narrows it only when slim', () => {
     const slim = render(<AvatarFigure recipe={SPECIALS[3]!.recipe} viewBox={VIEW_AVATAR} />);
     expect(slim.container.querySelector(`[transform="${SLIM_BODY}"]`)).not.toBeNull();
+    expect(slim.container.querySelector(`[transform="${CLASSIC_BODY}"]`)).toBeNull();
     const classic = render(
       <AvatarFigure recipe={{ ...SPECIALS[3]!.recipe, build: 'classic' }} viewBox={VIEW_AVATAR} />,
     );
     expect(classic.container.querySelector(`[transform="${SLIM_BODY}"]`)).toBeNull();
+    expect(classic.container.querySelector(`[transform="${CLASSIC_BODY}"]`)).not.toBeNull();
+  });
+
+  it('gives the default character the specials’ slender neck', () => {
+    // The slender neck's outline starts under the chin at (91.5, 124).
+    const neckOf = (recipe: Recipe) => {
+      const { container } = render(<AvatarFigure recipe={recipe} viewBox={VIEW_AVATAR} />);
+      return container.querySelector('path[d^="M91.5 124"]');
+    };
+    expect(neckOf(DEFAULT_RECIPE as Recipe)).not.toBeNull();
+    expect(neckOf(SPECIALS[0]!.recipe)).not.toBeNull();
+  });
+});
+
+describe('framing', () => {
+  const none = { label: '' };
+
+  it('lifts the figure so the lowered shoulders stay in frame', () => {
+    expect(liftFor(none, none)).toBe(7);
+    expect(liftFor(HAIRS.short, HATS.none)).toBe(7);
+  });
+
+  it('lifts less, or not at all, under tall hair and headwear', () => {
+    expect(liftFor(HAIRS.bun, HATS.none)).toBe(1);
+    expect(liftFor(HAIRS.short, HATS['top-hat'])).toBe(0);
+    expect(liftFor(HAIRS.short, HATS.party)).toBe(0);
+    // The taller of the two decides.
+    expect(liftFor(HAIRS.bun, HATS['top-hat'])).toBe(0);
+    expect(liftFor(HAIRS.short, HATS.horns)).toBe(6);
+  });
+
+  it('never moves a tall item above the room it had before the lift', () => {
+    for (const hair of Object.values(HAIRS) as Array<{ top?: number }>) {
+      for (const hat of Object.values(HATS) as Array<{ top?: number }>) {
+        const lift = liftFor({ label: '', ...hair }, { label: '', ...hat });
+        const top = Math.min(hair.top ?? Infinity, hat.top ?? Infinity);
+        if (top !== Infinity) expect(top - lift).toBeGreaterThanOrEqual(Math.min(top, 12));
+      }
+    }
   });
 });
 
@@ -84,23 +123,28 @@ describe('line weight', () => {
       (e) => e.style.strokeWidth,
     );
 
-  it('draws fine lines thinner and bold lines as drawn', () => {
-    const fine = render(<AvatarFigure recipe={SPECIALS[1]!.recipe} viewBox={VIEW_AVATAR} />);
-    expect(widths(fine.container).length).toBeGreaterThan(0);
-    expect(new Set(widths(fine.container))).toEqual(new Set(['2.4px']));
-
-    const bold = render(
-      <AvatarFigure recipe={{ ...SPECIALS[1]!.recipe, line: 'bold' }} viewBox={VIEW_AVATAR} />,
-    );
-    expect(new Set(widths(bold.container))).toEqual(new Set(['']));
+  it('draws every avatar with fine lines, the old bold look included', () => {
+    for (const recipe of [SPECIALS[1]!.recipe, DEFAULT_RECIPE as Recipe]) {
+      const { container, unmount } = render(<AvatarFigure recipe={recipe} viewBox={VIEW_AVATAR} />);
+      expect(widths(container).length).toBeGreaterThan(0);
+      expect(new Set(widths(container))).toEqual(new Set(['2.4px']));
+      unmount();
+    }
+    // A recipe saved with the bold option it used to have draws fine too.
+    const old = parseRecipe(JSON.stringify({ v: 1, style: 'character', line: 'bold' }));
+    const { container } = render(<AvatarFigure recipe={old} viewBox={VIEW_AVATAR} />);
+    expect(new Set(widths(container))).toEqual(new Set(['2.4px']));
   });
 
-  it('goes back to bold when switched', () => {
-    const view = render(<AvatarFigure recipe={SPECIALS[2]!.recipe} viewBox={VIEW_AVATAR} />);
-    view.rerender(
-      <AvatarFigure recipe={{ ...SPECIALS[2]!.recipe, line: 'bold' }} viewBox={VIEW_AVATAR} />,
-    );
-    expect(new Set(widths(view.container))).toEqual(new Set(['']));
+  it('thins less at small sizes, so outlines stay visible', () => {
+    expect(lineScale(256, 200)).toBe(0.4);
+    expect(lineScale(0, 180)).toBe(0.4);
+    expect(lineScale(40, 180)).toBeCloseTo(0.675);
+    expect(lineScale(16, 160)).toBe(1);
+    for (const px of [16, 24, 28, 40, 64, 128, 256]) {
+      const onScreen = (6 * lineScale(px, 180) * px) / 180;
+      expect(onScreen).toBeGreaterThanOrEqual(Math.min(0.9, (6 * px) / 180) - 1e-9);
+    }
   });
 });
 

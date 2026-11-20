@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { Link } from 'react-router';
+import { Link, useLocation } from 'react-router';
 import { toast } from 'sonner';
 import { Button } from '@/components/Button';
 import { Segmented } from '@/components/Segmented';
@@ -57,6 +57,19 @@ const VIEW = {
   clip: '30 32 80 80',
 } as const;
 
+/** Cameras on the head: they follow it when tall hair or headwear moves the figure down. */
+const HEAD_VIEWS = new Set<string>([
+  VIEW.head,
+  VIEW.hair,
+  VIEW.eyes,
+  VIEW.mouth,
+  VIEW.cheeks,
+  VIEW.hat,
+  VIEW.glasses,
+  VIEW.ear,
+  VIEW.clip,
+]);
+
 interface ItemSection {
   kind: 'items';
   slot: SlotId;
@@ -90,7 +103,7 @@ const colors = (slot: SlotId, title: string, when?: (r: Recipe) => boolean): Col
 
 const PLAIN_HATS = new Set(['none', 'halo', 'frog', 'santa']);
 const PLAIN_NECKS = new Set(['none', 'chain', 'pearls']);
-const PLAIN_GLASSES = new Set(['none', '3d']);
+const PLAIN_GLASSES = new Set(['none']);
 const PLAIN_EARRINGS = new Set(['none', 'pearls', 'hearts']);
 /** Tops with a second colour (the shirt under a blazer, a print, a patch, checks). */
 const ACCENT_TOPS = new Set(['blazer', 'print', 'patch', 'checker']);
@@ -184,6 +197,12 @@ const TABS: Array<{ id: string; label: string; icon: LucideIcon; sections: Secti
 ];
 
 type TabId = (typeof TABS)[number]['id'];
+
+/** The tab to open on: one asked for in the link's state (`{ tab: 'specials' }`), else Skin. */
+function initialTab(state: unknown): TabId {
+  const asked = (state as { tab?: unknown } | null)?.tab;
+  return TABS.some((t) => t.id === asked) ? (asked as TabId) : 'skin';
+}
 
 // ---------------------------------------------------------------------------------------------
 // Keyboard: arrow keys move through a radio group, in two dimensions when it wraps into a grid
@@ -311,6 +330,7 @@ function OptionGrid({
                 <AvatarFigure
                   recipe={{ ...recipe, ...section.hide, [section.slot]: id }}
                   viewBox={section.view}
+                  anchor={HEAD_VIEWS.has(section.view) ? 'head' : 'figure'}
                   className="size-full"
                 />
               </span>
@@ -407,7 +427,7 @@ function ColorSectionView({
   );
 }
 
-/** Ready-made characters to start from, and the line weight (which suits them best fine). */
+/** Ready-made characters to start from. */
 function SpecialsPanel({
   look,
   change,
@@ -422,7 +442,7 @@ function SpecialsPanel({
       <section>
         <SectionTitle id={headingId}>Specials</SectionTitle>
         <p className="-mt-2 mb-4 text-sm text-muted-foreground">
-          Ready-made characters with fine lines and doe eyes. Pick one, then change anything you
+          Ready-made characters with doe eyes and soft faces. Pick one, then change anything you
           like in the other tabs.
         </p>
         <div
@@ -472,22 +492,6 @@ function SpecialsPanel({
           })}
         </div>
       </section>
-      <section>
-        <SectionTitle id={`${headingId}-line`}>Lines</SectionTitle>
-        <Segmented
-          kind="radio"
-          label="Lines"
-          value={look.recipe.line === 'fine' ? 'fine' : 'bold'}
-          onChange={(line) => change((l) => ({ ...l, recipe: { ...l.recipe, line } }))}
-          options={[
-            { value: 'bold', label: 'Bold' },
-            { value: 'fine', label: 'Fine' },
-          ]}
-        />
-        <p className="mt-2 text-xs text-muted-foreground">
-          The specials use fine lines. Either works with any look.
-        </p>
-      </section>
     </>
   );
 }
@@ -500,7 +504,8 @@ export function AvatarStudio() {
   const viewer = useViewer();
   const draft = useAvatarDraft(viewer);
   const { look, change, undo } = draft;
-  const [tab, setTab] = useState<TabId>('skin');
+  const location = useLocation();
+  const [tab, setTab] = useState<TabId>(() => initialTab(location.state));
   const [updateAvatar, saving] = useMutation(UPDATE_AVATAR);
   const [savedFlash, setSavedFlash] = useState(false);
   const tabsId = useId();

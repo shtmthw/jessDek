@@ -40,7 +40,7 @@ To stop, run `docker compose down`. Your data is kept in the `realtime_db` volum
 - **Photos and videos, device to device.** Sent straight between browsers over WebRTC and never stored on the server. They can be downloaded while someone who has them is online. Up to 10 per message, with a caption.
 - **Replies and reactions.** Reply to any message and it arrives with a quote of the original; tap the quote to jump back to it. React with one emoji per person: six quick ones, or any emoji from a searchable picker. On phones, long-press a message for reactions and swipe it right to reply; on desktop, hover it or right-click. Reactions are quiet: no sound, and they never count as unread.
 - **You decide who reaches you.** Block someone and they can't message you, start a chat with you or add you to groups, and neither of you sees the other's online status. Mute any chat, remove a direct chat from your list, and (as a group's owner) remove members.
-- **Pleasant to use.** Messages appear immediately and retry if sending fails. Unread badges, a "new messages" pill, infinite scroll through history, day separators, a reconnecting banner, and `Ctrl/⌘ + K` to start a new chat.
+- **Pleasant to use.** Messages appear immediately and retry if sending fails. Unread badges, a "new messages" pill, infinite scroll through history, day separators, a reconnecting banner, and `Ctrl/⌘ + K` to start a new chat. New accounts get a one-time welcome that points them to their avatar and card.
 - **Mobile-first.** A single pane with back navigation on phones and two panes on desktop. Respects safe areas, uses 44 px tap targets, follows your system's light or dark theme, and can be installed as a PWA.
 - **Secure by default.** argon2id password hashing, httpOnly session cookies, rate limiting, input validation, and membership checks on every operation.
 - **One image.** The API and the web app ship together as `matthew552/realtime`. The only other container is PostgreSQL.
@@ -51,7 +51,7 @@ Everyone has a cartoon character as their avatar, drawn head and shoulders on th
 
 - **Face:** 10 skin tones, 6 face shapes, 16 eyes in 7 colours, brows, noses, 14 mouths, blush and freckles, and cheek stickers.
 - **Hair:** 36 styles in 16 colours (long styles tuck behind the ears and fall over the shoulders), and hair clips.
-- **Wardrobe:** 27 hats and headwear, 21 tops, 14 neck accessories, glasses, 8 earrings, and 19 colours for hats, tops, neck items, clips and earrings.
+- **Wardrobe:** 26 hats and headwear, 21 tops, 13 neck accessories, glasses, 8 earrings, and 19 colours for hats, tops, neck items, clips and earrings.
 - **A little pet** on your shoulder: a cat, puppy, chick, bunny, frog, ghost, hamster or bear.
 
 **Specials** are nine ready-made characters in a finer, softer style: thin lines, doe eyes and tiny mouths, with beanies, headphones, bead necklaces, a checkered sweater and more. Pick one in the studio's Specials tab, then change anything in the other tabs as usual. The **Fine** line weight works on any look.
@@ -180,7 +180,7 @@ docker run -d --name realtime-db -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=re
 
 cp .env.example .env     # set DATABASE_URL=postgresql://postgres:postgres@localhost:5432/realtime
 npm run db:migrate -w apps/server
-npm run db:seed -w apps/server    # optional demo users: alice, bob, carol, dave, erin (password: password123)
+npm run db:seed -w apps/server    # optional demo users: alice, bob, carol, dave, erin (password: SEED_PASSWORD, or a random one it prints)
 npm run dev
 ```
 

@@ -52,7 +52,6 @@ import {
   DIVIDERS,
   FINISHES,
   FONTS,
-  FRAME_BGS,
   FRAMES,
   INKS,
   LAYOUTS,
@@ -931,16 +930,6 @@ function AvatarTab({ card, user, set }: TabProps) {
       />
       {card.frame !== 'none' ? (
         <>
-          <section>
-            <SectionTitle id="frame-bg">Behind your avatar</SectionTitle>
-            <Segmented
-              kind="radio"
-              label="Behind your avatar"
-              value={card.frameBg}
-              onChange={(v) => set('frameBg', v)}
-              options={FRAME_BGS.map((o) => ({ value: o.id, label: o.label }))}
-            />
-          </section>
           <Tiles
             title="Ring"
             options={RINGS}

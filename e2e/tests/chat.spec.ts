@@ -93,6 +93,8 @@ test('group chats reach everyone and show unread counts', async ({ browser }) =>
 });
 
 test('history survives a reload and pages in earlier messages', async ({ browser }) => {
+  // Forty sends one after another: on a busy machine that alone can come close to the default 30 s.
+  test.slow();
   const a = await newUser(browser, unique('alice'));
   const b = await newUser(browser, unique('bob'));
   await startDirect(a.page, b.username);

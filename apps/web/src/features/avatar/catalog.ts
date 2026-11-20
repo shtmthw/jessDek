@@ -9,7 +9,7 @@ import {
 } from './palettes';
 import { CLIPS, EARRINGS, GLASSES } from './parts/accessories';
 import { NECKS, TOPS } from './parts/clothes';
-import { BROWS, BUILDS, CHEEKS, EYES, FACES, LINES, MARKS, MOUTHS, NOSES } from './parts/face';
+import { BROWS, BUILDS, CHEEKS, EYES, FACES, MARKS, MOUTHS, NOSES } from './parts/face';
 import { HAIRS } from './parts/hair';
 import { HATS } from './parts/hats';
 import { PETS } from './parts/pets';
@@ -44,8 +44,6 @@ export const SLOTS = {
   topColor: { kind: 'colors', swatches: ITEM_COLORS },
   topAccent: { kind: 'colors', swatches: ITEM_COLORS },
   pet: { kind: 'items', items: PETS as Record<string, Item> },
-  /** Outline weight for the whole drawing: the classic bold line, or the finer one the specials use. */
-  line: { kind: 'items', items: LINES as Record<string, { label: string }> },
   /** Neck and shoulders. Only the specials use `slim`; the studio doesn't offer it. */
   build: { kind: 'items', items: BUILDS as Record<string, { label: string }> },
 } as const satisfies Record<

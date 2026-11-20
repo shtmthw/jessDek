@@ -264,7 +264,6 @@ export default function DevCards() {
           ))}
         </Section>
         <Each k="frame" user={people[4]} />
-        <Each k="frameBg" base={{ ...SKETCH, frame: 'blob', bg: 'peach' }} user={people[4]} />
         <Each
           k="ring"
           base={{ ...SKETCH, accent: 'rose', borderColor: 'accent' }}

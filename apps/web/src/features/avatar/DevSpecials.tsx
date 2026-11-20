@@ -7,15 +7,18 @@ import { SPECIALS } from './specials';
 /**
  * Dev only (/dev/specials?slot=hat&from=0&count=9): every special, plus the classic default,
  * wearing every item of one slot, so clashes between items and the new hair are easy to spot.
+ * `&build=classic` redraws every row on the default (classic) build.
  */
 export default function DevSpecials() {
   const [params] = useSearchParams();
   const slot = (params.get('slot') ?? 'hat') as SlotId;
   const from = Number(params.get('from') ?? 0);
   const count = Number(params.get('count') ?? 9);
+  const build = params.get('build');
+  const as = (r: Recipe): Recipe => (build === 'classic' ? { ...r, build: 'classic' } : r);
   const ids = SLOTS[slot] ? slotIds(slot).slice(from, from + count) : [];
   const rows: Array<{ id: string; recipe: Recipe }> = [
-    ...SPECIALS.map((s) => ({ id: s.id, recipe: s.recipe })),
+    ...SPECIALS.map((s) => ({ id: s.id, recipe: as(s.recipe) })),
     { id: 'classic', recipe: DEFAULT_RECIPE as Recipe },
   ];
   return (

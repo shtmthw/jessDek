@@ -59,7 +59,6 @@ export const DEFAULT_CARD: Readonly<CardRecipe> = Object.freeze({
   corners: 'soft',
   finish: 'matte',
   frame: 'circle',
-  frameBg: 'avatar',
   ring: 'none',
   divider: 'sketch',
   chips: 'plain',

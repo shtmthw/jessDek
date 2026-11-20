@@ -14,12 +14,13 @@ const viewer: Viewer = {
   email: 'alice@example.com',
   avatarColor: '#6366f1',
   avatar: null,
+  welcomed: true,
 };
 
-function renderStudio() {
+function renderStudio(state?: unknown) {
   return render(
     <MockedProvider mocks={[]}>
-      <MemoryRouter initialEntries={['/settings/avatar']}>
+      <MemoryRouter initialEntries={[{ pathname: '/settings/avatar', state }]}>
         <ViewerProvider viewer={viewer}>
           {/* Stands in for the chat search box that sits beside the studio on desktop. */}
           <input aria-label="Search chats" />
@@ -39,6 +40,20 @@ beforeAll(() => {
 beforeEach(() => clearDrafts());
 
 describe('AvatarStudio', () => {
+  it('opens on Skin, or on the tab the link asks for', () => {
+    const first = renderStudio();
+    expect(screen.getByRole('tab', { name: 'Skin' })).toHaveAttribute('aria-selected', 'true');
+    first.unmount();
+
+    // The welcome's "Make my character" opens the ready-made looks.
+    const asked = renderStudio({ tab: 'specials' });
+    expect(screen.getByRole('tab', { name: 'Specials' })).toHaveAttribute('aria-selected', 'true');
+    asked.unmount();
+
+    renderStudio({ tab: 'nonsense' });
+    expect(screen.getByRole('tab', { name: 'Skin' })).toHaveAttribute('aria-selected', 'true');
+  });
+
   it('marks a picked item as unsaved and undoes it with Ctrl+Z', () => {
     renderStudio();
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();

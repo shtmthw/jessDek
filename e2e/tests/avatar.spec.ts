@@ -73,8 +73,8 @@ test('starts from a special character, keeps it after a reload, and can still ch
     'aria-checked',
     'true',
   );
-  // Specials draw with fine lines.
-  await expect(page.getByRole('radio', { name: 'Fine' })).toHaveAttribute('aria-checked', 'true');
+  // Every avatar draws with fine lines now: there's no line weight to pick.
+  await expect(page.getByRole('radio', { name: 'Bold' })).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.getByText('Avatar saved')).toBeVisible();
@@ -95,6 +95,4 @@ test('starts from a special character, keeps it after a reload, and can still ch
     'aria-checked',
     'false',
   );
-  await page.getByRole('radio', { name: 'Bold' }).click();
-  await expect(page.getByRole('radio', { name: 'Bold' })).toHaveAttribute('aria-checked', 'true');
 });

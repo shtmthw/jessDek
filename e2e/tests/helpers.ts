@@ -2,14 +2,23 @@ import { expect, type Browser, type Page } from '@playwright/test';
 
 export const unique = (name: string) => `${name}${Math.random().toString(36).slice(2, 7)}`;
 
-export async function signUp(page: Page, username: string, password = 'password123') {
+export async function signUp(page: Page, username: string, password = 'test-password-1') {
   await page.goto('/');
   await page.getByRole('tab', { name: 'Sign up' }).click();
   await page.getByLabel('Username').fill(username);
   await page.getByLabel('Email').fill(`${username}@example.com`);
   await page.getByLabel('Password', { exact: true }).fill(password);
   await page.getByRole('button', { name: 'Create account' }).click();
+  await closeWelcome(page);
   await expect(page.getByRole('heading', { name: 'Chats' })).toBeVisible();
+}
+
+/** A new account is greeted once; close it the way most people will. */
+export async function closeWelcome(page: Page) {
+  const welcome = page.getByRole('dialog', { name: 'Welcome to Realtime' });
+  await expect(welcome).toBeVisible();
+  await welcome.getByRole('button', { name: 'Start chatting' }).click();
+  await expect(welcome).toBeHidden();
 }
 
 /** A fresh browser context (own cookies) with a page that is already signed up. */

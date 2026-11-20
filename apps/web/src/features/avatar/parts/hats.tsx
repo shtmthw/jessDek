@@ -42,6 +42,7 @@ export const HATS = {
   none: { label: 'None' },
   beanie: {
     label: 'Beanie',
+    top: 8,
     clip: below(70),
     front: (p) => (
       <g>
@@ -84,6 +85,7 @@ export const HATS = {
   },
   'cap-back': {
     label: 'Backwards cap',
+    top: 16.6,
     clip: below(72),
     back: (p) => (
       <path
@@ -141,6 +143,7 @@ export const HATS = {
   },
   crown: {
     label: 'Crown',
+    top: 12,
     front: (p) => (
       <g>
         <path
@@ -218,6 +221,7 @@ export const HATS = {
   },
   'cat-ears': {
     label: 'Cat ears',
+    top: 15,
     front: (p) => {
       const ear = (
         <g>
@@ -236,6 +240,7 @@ export const HATS = {
   },
   'bunny-ears': {
     label: 'Bunny ears',
+    top: -3.1,
     front: (p) => (
       <g>
         <g transform="rotate(-12 82 46)">
@@ -264,6 +269,7 @@ export const HATS = {
   },
   party: {
     label: 'Party hat',
+    top: -2.8,
     front: (p) => (
       <g transform="rotate(10 100 56)">
         <path
@@ -284,6 +290,7 @@ export const HATS = {
   },
   'top-hat': {
     label: 'Top hat',
+    top: 11,
     clip: below(58),
     front: (p) => (
       <g>
@@ -300,6 +307,7 @@ export const HATS = {
   },
   wizard: {
     label: 'Wizard hat',
+    top: 8.1,
     clip: below(62),
     front: (p) => (
       <g>
@@ -468,6 +476,7 @@ export const HATS = {
   },
   halo: {
     label: 'Halo',
+    top: 13.5,
     front: () => (
       <g>
         <ellipse cx={100} cy={22} rx={31} ry={8.5} {...line(INK, 10.5)} />
@@ -477,6 +486,7 @@ export const HATS = {
   },
   horns: {
     label: 'Horns',
+    top: 18,
     front: (p) => {
       const horn = (
         <path
@@ -536,6 +546,7 @@ export const HATS = {
   },
   'mini-beret': {
     label: 'Mini beret',
+    top: 18.1,
     front: (p) => (
       <g transform="rotate(14 124 38)">
         <path d="M124 29 L125.5 22" {...line(INK, 4.4)} />

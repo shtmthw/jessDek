@@ -8,6 +8,7 @@ import { Skeleton } from '@/components/Skeleton';
 import { spring } from '@/lib/motion';
 import { DealtCard } from './CardDialog';
 import { CardView, type CardUser } from './CardView';
+import { useCardFontGate } from './fonts';
 import type { CardRecipe } from './recipe';
 import { copyCardLink, shareCard } from './share';
 
@@ -47,6 +48,8 @@ export function CardPage({
   /** Signed out: go to the sign-up form. */
   onSignUp?: () => void;
 }) {
+  // Deal the card once its font is here, so its text doesn't reflow mid-toss.
+  const fontReady = useCardFontGate(state.status === 'ready' ? state.card.font : undefined);
   const body = (
     <motion.div
       className="flex flex-1 flex-col items-center justify-center gap-5 px-4 py-6"
@@ -55,7 +58,7 @@ export function CardPage({
       transition={spring.soft}
     >
       <div style={{ width: CARD_WIDTH }}>
-        {state.status === 'loading' ? (
+        {state.status === 'loading' || (state.status === 'ready' && !fontReady) ? (
           <Skeleton className="aspect-[320/540] w-full rounded-2xl" />
         ) : state.status === 'missing' ? (
           <div className="flex aspect-[320/540] w-full flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border px-8 text-center">
@@ -165,7 +168,8 @@ export function CardPage({
 
 function Shell({ bar, children }: { bar: ReactNode; children: ReactNode }) {
   return (
-    <div className="flex h-full min-h-dvh flex-col overflow-y-auto bg-background md:min-h-0">
+    // overflow-x-hidden: the card's toss and stickers hanging off its edge never scroll the page sideways.
+    <div className="flex h-full min-h-dvh flex-col overflow-y-auto overflow-x-hidden bg-background md:min-h-0">
       <header className="sticky top-0 z-10 flex h-[calc(4rem+env(safe-area-inset-top))] shrink-0 items-center justify-between gap-2 border-b border-border/80 bg-background/90 px-4 pt-[env(safe-area-inset-top)] backdrop-blur-md md:px-6">
         {bar}
       </header>

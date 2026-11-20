@@ -35,7 +35,6 @@ export const DEFAULT_RECIPE: Readonly<Recipe> = Object.freeze({
   topColor: 'indigo',
   topAccent: 'jade',
   pet: 'none',
-  line: 'bold',
   build: 'classic',
 });
 
@@ -101,8 +100,8 @@ export function randomRecipe(from: Recipe, rand: () => number = Math.random): Re
   const pick = <T>(list: readonly T[]) => list[Math.floor(rand() * list.length)]!;
   const out = { ...from };
   for (const slot of SLOT_KEYS) {
-    // Line weight and build are drawing styles, like initials: Randomize keeps them.
-    if (slot === 'line' || slot === 'build') continue;
+    // The build is a drawing style, like initials: Randomize keeps it.
+    if (slot === 'build') continue;
     const ids = slotIds(slot);
     const chance = WEAR_CHANCE[slot];
     if (chance !== undefined) {

@@ -1,11 +1,17 @@
 // Demo data for local development and README screenshots.
 // Safe to run repeatedly: it does nothing if any user already exists.
+import { randomBytes } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { hashPassword } from '../src/auth.js';
 import { AVATAR_COLORS } from '../src/services/users.js';
 
 const prisma = new PrismaClient();
-const PASSWORD = 'password123';
+/**
+ * The demo users' password. Never a fixed one in the repo (it's public): set SEED_PASSWORD to choose
+ * it, or a random one is made and printed once below.
+ */
+const PASSWORD_FROM_ENV = Boolean(process.env.SEED_PASSWORD);
+const PASSWORD = process.env.SEED_PASSWORD || randomBytes(12).toString('base64url');
 
 /** An avatar recipe in the shape the web client draws (AVATAR_PLAN.md §2); unset slots use the defaults. */
 const look = (slots: Record<string, string>) =>
@@ -194,6 +200,8 @@ async function main() {
         passwordHash,
         avatarColor: AVATAR_COLORS[(i * 3) % AVATAR_COLORS.length]!,
         ...cards[p.username],
+        // Demo accounts have "been around": the welcome is for new sign-ups.
+        welcomedAt: new Date(),
       },
     });
     users[p.username] = u.id;
@@ -321,8 +329,12 @@ async function main() {
     ],
   );
 
+  const names = people.map((p) => p.username).join(', ');
   console.log(
-    `Seeded ${people.length} users (password for all: "${PASSWORD}"): ${people.map((p) => p.username).join(', ')}`,
+    PASSWORD_FROM_ENV
+      ? `Seeded ${people.length} users (${names}); their password is SEED_PASSWORD.`
+      : `Seeded ${people.length} users (${names}) with a random password, shown only now: ${PASSWORD}\n` +
+          'Set SEED_PASSWORD (in .env) to choose it instead.',
   );
 }
 

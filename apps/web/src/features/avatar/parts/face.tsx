@@ -28,12 +28,6 @@ export const FACES = {
   },
 } as const satisfies Record<string, { label: string; d: string }>;
 
-/** Outline weight for the whole drawing (AvatarFigure scales every stroke for "fine"). */
-export const LINES = {
-  bold: { label: 'Bold' },
-  fine: { label: 'Fine' },
-} as const satisfies Record<string, { label: string }>;
-
 export type FaceId = keyof typeof FACES;
 
 export function Ears({ p }: { p: Paint }) {
@@ -56,41 +50,50 @@ export function Ears({ p }: { p: Paint }) {
   );
 }
 
-/** Body build: the classic neck and shoulders, or the specials' slender neck and smaller frame. */
+/**
+ * Body build. Both have the same slender neck (the specials' one); the slim build's shoulders are a
+ * little narrower.
+ */
 export const BUILDS = {
   classic: { label: 'Classic' },
   slim: { label: 'Slim' },
 } as const satisfies Record<string, { label: string }>;
 
 /**
- * Where the slim build's shoulders sit: a little lower and narrower than the classic ones, so a
- * longer neck shows (AvatarFigure moves the clothes, necklaces and pets with it).
+ * Where the shoulders sit: lowered under the long neck (AvatarFigure moves the clothes, necklaces
+ * and pets with them, and the whole figure up a little so they stay in frame).
  */
+export const CLASSIC_BODY = 'translate(0 17)';
+/** The slim build's shoulders: lowered the same way, and a little narrower. */
 export const SLIM_BODY = 'translate(100 17) scale(0.92 1) translate(-100 0)';
+export const bodyOf = (slim: boolean) => (slim ? SLIM_BODY : CLASSIC_BODY);
 
+/**
+ * For things that hug the neck (chokers), which are drawn in the body's coordinates: the classic
+ * body isn't narrowed, so this narrows them to the neck as the slim body does.
+ */
+export const NECK_HUG = 'translate(100 0) scale(0.92 1) translate(-100 0)';
+
+/**
+ * The neck: slender, flaring out into the (lowered) shoulders. The flare ends where the build's
+ * neckline starts, so the neck meets the collar on both; the bottom hides under the top.
+ */
 export function Neck({ p, slim }: { p: Paint; slim?: boolean }) {
-  if (slim) {
-    return (
-      <g>
-        {/* Slender, flaring out into the (lowered) shoulders; the bottom hides under the top. */}
-        <path
-          d="M91.5 124 C91.5 145 91 158 86.5 170 L86.5 184 L113.5 184 L113.5 170 C109 158 108.5 145 108.5 124 Z"
-          fill={p.skin}
-          {...outline}
-        />
-        <path
-          d="M92 147 C96 155.5 104 155.5 108 147 V156 C104 160 96 160 92 156 Z"
-          fill={p.skinShade}
-          opacity={0.75}
-        />
-      </g>
-    );
-  }
+  // The crew neckline's corners (x 85 and 115 in body coordinates), where the body puts them.
+  const [l, r] = slim ? [86.5, 113.5] : [85, 115];
   return (
     <g>
-      <path d="M85 126 V164 H115 V126 Z" fill={p.skin} {...outline} />
+      <path
+        d={`M91.5 124 C91.5 145 91 158 ${l} 170 L${l} 184 L${r} 184 L${r} 170 C109 158 108.5 145 108.5 124 Z`}
+        fill={p.skin}
+        {...outline}
+      />
       {/* The shadow the chin casts. */}
-      <path d="M88 136 C93 149 107 149 112 136 V151 C106 156 94 156 88 151 Z" fill={p.skinShade} />
+      <path
+        d="M92 147 C96 155.5 104 155.5 108 147 V156 C104 160 96 160 92 156 Z"
+        fill={p.skinShade}
+        opacity={0.75}
+      />
     </g>
   );
 }

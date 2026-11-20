@@ -57,16 +57,6 @@ export default function DevAvatars() {
                     size={size}
                   />
                 ))}
-                <div
-                  className="size-16 overflow-hidden rounded-full"
-                  style={{ backgroundColor: '#3fa56b' }}
-                >
-                  <Figure
-                    recipe={{ ...sp.recipe, line: 'bold' }}
-                    viewBox={VIEW_AVATAR}
-                    className="size-full"
-                  />
-                </div>
               </div>
               <figcaption className="mt-1 text-xs text-muted-foreground">{sp.label}</figcaption>
             </figure>
