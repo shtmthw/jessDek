@@ -102,6 +102,32 @@ test('capture README screenshots', async ({ browser }) => {
     await desk.context.close();
   }
 
+  // Themes: the theme sheet on alice ↔ bob (seeded with Doodles), and Weekend hike (Matcha, with
+  // member colours) in dark. Nothing is saved, so the pictures after this are unaffected.
+  {
+    const desk = await signIn(browser, 'alice', 'light');
+    await chat(desk.page, /Bob Carter/).click();
+    await expect(desk.page.getByText('Absolutely, send me the link')).toBeVisible();
+    await desk.page.getByRole('button', { name: 'Chat options' }).click();
+    await desk.page.getByRole('menuitem', { name: 'Theme' }).click();
+    const sheet = desk.page.getByRole('dialog', { name: 'Chat theme' });
+    await expect(sheet.getByRole('tab', { name: 'Themes' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await settle(desk.page, 900);
+    await desk.page.screenshot({ path: `${OUT}theme-sheet-light.png` });
+    await sheet.getByRole('button', { name: 'Cancel' }).click();
+    await desk.context.close();
+
+    const dark = await signIn(browser, 'alice', 'dark');
+    await chat(dark.page, /Weekend hike/).click();
+    await expect(dark.page.getByText('Trail map is in the shared folder')).toBeVisible();
+    await settle(dark.page, 900);
+    await dark.page.screenshot({ path: `${OUT}group-theme-dark.png` });
+    await dark.context.close();
+  }
+
   // Pass 3: photos and videos. The seed can't hold any (the server never stores media), so Alice
   // adds some live, last, so the earlier pictures are unaffected.
   const sendMedia = async (page: Page, caption: string) => {

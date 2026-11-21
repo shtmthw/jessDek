@@ -220,6 +220,10 @@ async function main() {
       name?: string;
       members: string[];
       readUpTo?: Record<string, number>;
+      /** A chat theme preset, who set it and how many minutes ago. */
+      theme?: { preset: string; by: string; ago: number };
+      /** Group members' own colours. */
+      colors?: Record<string, string>;
     },
     lines: Array<[string, string, number, Extra?]>, // [sender, text, minutes ago, extras]
   ) {
@@ -233,12 +237,20 @@ async function main() {
         createdById: memberIds[0]!,
         createdAt: minutesAgo(60 * 24 * 3),
         lastMessageAt: minutesAgo(last),
+        ...(data.theme
+          ? {
+              theme: JSON.stringify({ v: 1, preset: data.theme.preset }),
+              themeSetById: id(data.theme.by),
+              themeSetAt: minutesAgo(data.theme.ago),
+            }
+          : {}),
         members: {
           create: memberIds.map((userId, i) => ({
             userId,
             role: i === 0 ? 'OWNER' : 'MEMBER',
             // Members are "read up to" N minutes ago; default: everything is read.
             lastReadAt: minutesAgo(data.readUpTo?.[data.members[i]!] ?? 0),
+            color: data.colors?.[data.members[i]!] ?? null,
           })),
         },
       },
@@ -271,23 +283,31 @@ async function main() {
   }
 
   const day = 60 * 24;
-  await chat({ type: 'DIRECT', members: ['alice', 'bob'], readUpTo: { alice: 0 } }, [
-    ['bob', 'Morning! Did you get a chance to look at the new designs?', day + 190],
-    ['alice', 'Yes — I like the simpler sidebar a lot.', day + 185],
-    ['bob', 'Great. Shipping the mobile layout today.', day + 180],
-    ['alice', 'Hey Bob, how is the mobile layout going?', 42],
-    ['bob', 'Pretty well! Messages now arrive instantly instead of polling.', 38],
-    ['alice', 'Nice. Does it work when the phone is offline for a bit?', 35],
+  await chat(
+    {
+      type: 'DIRECT',
+      members: ['alice', 'bob'],
+      readUpTo: { alice: 0 },
+      theme: { preset: 'doodles', by: 'bob', ago: 20 },
+    },
     [
-      'bob',
-      'It reconnects on its own and shows a little banner while it does.',
-      33,
-      { replyTo: 5, reactions: { alice: ['🙌', 30] } },
+      ['bob', 'Morning! Did you get a chance to look at the new designs?', day + 190],
+      ['alice', 'Yes — I like the simpler sidebar a lot.', day + 185],
+      ['bob', 'Great. Shipping the mobile layout today.', day + 180],
+      ['alice', 'Hey Bob, how is the mobile layout going?', 42],
+      ['bob', 'Pretty well! Messages now arrive instantly instead of polling.', 38],
+      ['alice', 'Nice. Does it work when the phone is offline for a bit?', 35],
+      [
+        'bob',
+        'It reconnects on its own and shows a little banner while it does.',
+        33,
+        { replyTo: 5, reactions: { alice: ['🙌', 30] } },
+      ],
+      ['bob', 'Want to try it on your phone?', 32],
+      // Bob's reaction comes after the last message, so the chat list mentions it.
+      ['alice', 'Absolutely, send me the link 🚀', 6, { reactions: { bob: ['❤️', 4] } }],
     ],
-    ['bob', 'Want to try it on your phone?', 32],
-    // Bob's reaction comes after the last message, so the chat list mentions it.
-    ['alice', 'Absolutely, send me the link 🚀', 6, { reactions: { bob: ['❤️', 4] } }],
-  ]);
+  );
 
   await chat(
     {
@@ -295,6 +315,8 @@ async function main() {
       name: 'Weekend hike 🥾',
       members: ['alice', 'bob', 'carol', 'dave'],
       readUpTo: { alice: 25 },
+      theme: { preset: 'matcha', by: 'carol', ago: 60 },
+      colors: { bob: 'orange' },
     },
     [
       ['carol', 'Forecast looks clear for Saturday!', 190],

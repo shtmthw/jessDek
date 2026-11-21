@@ -8,6 +8,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
@@ -83,17 +84,17 @@ function Bubble({
       onClick={onClick}
       className={cn(
         'w-fit max-w-full whitespace-pre-wrap break-words px-3.5 py-2 text-[15px] leading-[1.42] md:px-4',
-        'transition-[border-radius,opacity,background-color] duration-300 ease-out-quint',
+        'transition-[border-radius,opacity,background-color,color,outline-color,box-shadow] duration-300 ease-out-quint',
         // On touch screens a long-press opens the message's actions (Copy text among them).
         'pointer-coarse:select-none pointer-coarse:[-webkit-touch-callout:none]',
         quote && 'pt-1.5 md:pt-1.5',
         flash && 'message-flash',
-        mine ? 'bg-brand text-brand-foreground' : 'bg-bubble text-foreground',
+        mine ? 'bg-mine text-mine-foreground' : 'bg-bubble text-bubble-foreground',
         bubbleCorners(mine, first, last),
         status === 'sending' && 'opacity-70',
         status === 'failed' && 'opacity-60',
         mine
-          ? '[&_a]:text-brand-foreground [&_a]:decoration-white/50'
+          ? '[&_a]:text-mine-foreground [&_a]:decoration-current/50'
           : '[&_a]:text-brand-text [&_a]:decoration-current/40',
       )}
     >
@@ -430,7 +431,45 @@ function MessageRow({
   );
 }
 
-function Separator({ item }: { item: Exclude<TimelineItem, { kind: 'run' | 'day' }> }) {
+/** A theme change (or another event) shown in the timeline, and how to act on it. */
+export interface ChatNotice {
+  /** When it happened (ISO 8601). */
+  at: string;
+  text: string;
+  /** Shows a "Change" link (opens the theme sheet). */
+  onChange?: () => void;
+}
+
+function Separator({
+  item,
+  notice,
+}: {
+  item: Exclude<TimelineItem, { kind: 'run' | 'day' }>;
+  notice?: ChatNotice | null;
+}) {
+  if (item.kind === 'notice') {
+    if (!notice) return null;
+    return (
+      <p
+        data-chat-notice
+        className="mx-auto my-3 w-fit max-w-[85%] text-balance rounded-2xl bg-background/85 px-3 py-1 text-center text-xs text-muted-foreground shadow-sm ring-1 ring-border backdrop-blur-md"
+      >
+        {notice.text}
+        {notice.onChange ? (
+          <>
+            {' · '}
+            <button
+              type="button"
+              onClick={notice.onChange}
+              className="-mx-1 -my-1 rounded px-1 py-1 font-semibold text-brand-text hover:underline"
+            >
+              Change
+            </button>
+          </>
+        ) : null}
+      </p>
+    );
+  }
   if (item.kind === 'unread') {
     return (
       <div
@@ -472,6 +511,8 @@ export function MessageList({
   onReact,
   onJump,
   jump,
+  memberStyle,
+  notice,
 }: {
   messages: DisplayMessage[];
   viewerId: string;
@@ -505,6 +546,10 @@ export function MessageList({
   onJump: (messageId: string) => void;
   /** Scroll to this message and ring it (set after `onJump` found it). `nonce` repeats a jump. */
   jump?: { id: string; nonce: number } | null;
+  /** Groups: a member's colour (CSS variables) for their runs. */
+  memberStyle?: (userId: string) => CSSProperties | undefined;
+  /** The latest theme change, shown at its place in the timeline. */
+  notice?: ChatNotice | null;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const topSentinel = useRef<HTMLDivElement>(null);
@@ -625,9 +670,14 @@ export function MessageList({
     }
   }, [messages]);
 
+  const noticeAt = notice?.at;
   const timeline = useMemo(
-    () => buildTimeline(messages, viewerId, new Date(), { firstUnreadId }),
-    [messages, viewerId, firstUnreadId],
+    () =>
+      buildTimeline(messages, viewerId, new Date(), {
+        firstUnreadId,
+        notice: noticeAt ? { key: 'theme-notice', at: noticeAt, leading: !hasMore } : null,
+      }),
+    [messages, viewerId, firstUnreadId, noticeAt, hasMore],
   );
   // Each day is its own section so its label can stick to the top while you scroll through it.
   const sections = useMemo(() => {
@@ -775,9 +825,12 @@ export function MessageList({
     // The avatar sits by the run's last bubble. A reaction pill hangs 18px below that bubble
     // (26px tall, tucked 8px under it), so lift the avatar by as much to stay level with the bubble.
     const pillBelow = (run.messages[run.messages.length - 1]?.reactions?.length ?? 0) > 0;
+    const colored = others ? memberStyle?.(run.sender.id) : undefined;
     return (
       <div
         key={run.key}
+        data-member={colored ? '' : undefined}
+        style={colored}
         className={cn('mt-3 flex items-end gap-2 first:mt-0', run.mine && 'justify-end')}
       >
         {others ? (
@@ -813,7 +866,12 @@ export function MessageList({
           )}
         >
           {others ? (
-            <span className="mb-0.5 px-3.5 text-xs font-medium text-muted-foreground">
+            <span
+              className={cn(
+                'mb-0.5 px-3.5 text-xs font-medium',
+                colored ? 'text-[var(--member-name)]' : 'text-muted-foreground',
+              )}
+            >
               {run.sender.displayName}
             </span>
           ) : null}
@@ -892,7 +950,7 @@ export function MessageList({
                   item.kind === 'run' ? (
                     renderRun(item)
                   ) : item.kind === 'day' ? null : (
-                    <Separator key={item.key} item={item} />
+                    <Separator key={item.key} item={item} notice={notice} />
                   ),
                 )}
               </div>

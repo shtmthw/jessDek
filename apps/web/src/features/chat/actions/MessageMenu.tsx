@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { useChatThemeScope } from '../../theme/ChatWallpaper';
 import { cn } from '@/lib/cn';
 import { exit, spring } from '@/lib/motion';
 import { preloadEmojiPicker } from '../reactions/EmojiPickerDialog';
@@ -234,6 +235,8 @@ export function MessageMenu({
     }
   }
 
+  // Drawn outside the chat, so it carries the chat's theme itself (its accent marks your reaction).
+  const themeScope = useChatThemeScope();
   const ready = placed;
   const emojiSize = touch ? 'size-11 text-[27px]' : 'size-10 text-[24px]';
 
@@ -245,7 +248,8 @@ export function MessageMenu({
       aria-label="Message actions"
       className="fixed inset-0 z-50"
       onKeyDown={onKeyDown}
-      style={{ visibility: ready ? 'visible' : 'hidden' }}
+      data-chat-theme={themeScope['data-chat-theme']}
+      style={{ ...themeScope.style, visibility: ready ? 'visible' : 'hidden' }}
     >
       {/* Any touch or click outside closes. Pointer-down, so the finger that opened it can lift. */}
       <div

@@ -30,6 +30,13 @@ export interface ConversationView {
   ownerId: string | null;
   /** The newest reaction by the viewer or on the viewer's message, if newer than the last message. */
   lastReaction: ReactionPreviewRow | null;
+  /** Chat theme recipe (JSON). Null: Classic. */
+  theme: string | null;
+  /** Who last changed the theme, and when. */
+  themeSetBy: User | null;
+  themeSetAt: Date | null;
+  /** Groups: colours members picked for themselves. */
+  memberColors: Array<{ userId: string; color: string }>;
 }
 
 const reactionPreviewInclude = {
@@ -64,7 +71,9 @@ const usernamesSchema = z
   .max(99, 'That’s too many people at once');
 
 const include = {
-  members: { include: { user: true }, orderBy: { joinedAt: 'asc' } },
+  themeSetBy: true,
+  // Join order, with a tiebreak: automatic member colours follow it, so it must be stable.
+  members: { include: { user: true }, orderBy: [{ joinedAt: 'asc' }, { userId: 'asc' }] },
   messages: {
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     take: 1,
@@ -107,6 +116,13 @@ async function toView(userId: string, row: Row): Promise<ConversationView> {
     canMessage,
     ownerId: row.members.find((m) => m.role === 'OWNER')?.userId ?? null,
     lastReaction: await lastReactionFor(userId, row.id, row.lastMessageAt),
+    theme: row.theme,
+    themeSetBy: row.themeSetBy,
+    themeSetAt: row.themeSetAt,
+    memberColors:
+      row.type === 'GROUP'
+        ? row.members.flatMap((m) => (m.color ? [{ userId: m.userId, color: m.color }] : []))
+        : [],
   };
 }
 

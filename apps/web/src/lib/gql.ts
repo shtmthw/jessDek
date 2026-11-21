@@ -127,6 +127,18 @@ export interface Conversation {
   ownerId: string | null;
   /** The reaction the chat list mentions, if any. */
   lastReaction: ReactionPreview | null;
+  /** Chat theme recipe (JSON), the same for everyone. Null: Classic. */
+  theme: string | null;
+  /** Who last changed the theme, and when (ISO 8601). */
+  themeSetBy: (Pick<User, 'id' | 'displayName'> & { __typename?: 'User' }) | null;
+  themeSetAt: string | null;
+  /** Groups: colours members picked for themselves (the rest are automatic). */
+  memberColors: MemberColor[];
+}
+export interface MemberColor {
+  __typename?: 'MemberColor';
+  userId: string;
+  color: string;
 }
 export interface MessagePage {
   __typename?: 'MessagePage';
@@ -284,6 +296,16 @@ export const CONVERSATION_FIELDS = gql`
     }
     lastMessage {
       ...MessageFields
+    }
+    theme
+    themeSetAt
+    themeSetBy {
+      id
+      displayName
+    }
+    memberColors {
+      userId
+      color
     }
     lastReaction {
       emoji
@@ -600,6 +622,30 @@ export const OPEN_RELAY: Doc<
   mutation OpenRelay($requestId: ID!, $holderPeerId: ID!, $key: String) {
     openRelay(requestId: $requestId, holderPeerId: $holderPeerId, key: $key)
   }
+`;
+
+export const SET_CHAT_THEME: Doc<
+  { setChatTheme: Conversation },
+  { conversationId: string; theme: string | null }
+> = gql`
+  mutation SetChatTheme($conversationId: ID!, $theme: String) {
+    setChatTheme(conversationId: $conversationId, theme: $theme) {
+      ...ConversationFields
+    }
+  }
+  ${CONVERSATION_FIELDS}
+`;
+
+export const SET_MEMBER_COLOR: Doc<
+  { setMemberColor: Conversation },
+  { conversationId: string; color: string | null }
+> = gql`
+  mutation SetMemberColor($conversationId: ID!, $color: String) {
+    setMemberColor(conversationId: $conversationId, color: $color) {
+      ...ConversationFields
+    }
+  }
+  ${CONVERSATION_FIELDS}
 `;
 
 export const MUTE_CONVERSATION: Doc<

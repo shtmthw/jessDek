@@ -23,6 +23,12 @@
   --elevation-md: 0 4px 12px -2px rgb(24 24 27 / 0.08), 0 2px 4px -2px rgb(24 24 27 / 0.05);
   --elevation-lg: 0 24px 48px -12px rgb(24 24 27 / 0.18), 0 8px 16px -8px rgb(24 24 27 / 0.08);
   --pane-shadow: -12px 0 32px rgb(24 24 27 / 0.1);
+  /* Bubbles: yours and other people's. A chat theme (below) replaces them. */
+  --mine: var(--brand);
+  --mine-foreground: var(--brand-foreground);
+  --bubble-foreground: var(--foreground);
+  /* The ring on a chosen option: the app's own accent, even inside a themed preview. */
+  --select-ring: var(--brand-text);
 }
 
 .dark {
@@ -59,6 +65,9 @@
   --color-danger: var(--danger);
   --color-online: var(--online);
   --color-bubble: var(--bubble);
+  --color-bubble-foreground: var(--bubble-foreground);
+  --color-mine: var(--mine);
+  --color-mine-foreground: var(--mine-foreground);
   --shadow-sm: var(--elevation-sm);
   --shadow-md: var(--elevation-md);
   --shadow-lg: var(--elevation-lg);
@@ -296,5 +305,109 @@
     100% {
       box-shadow: 0 0 0 3px transparent;
     }
+  }
+}
+
+/* ---- Chat themes (features/theme) ----
+   A themed chat carries every colour for both modes as --l-* and --d-* variables (themeVars), and
+   these rules pick the right set, so switching light/dark never re-renders the chat. Components
+   inside keep using the usual names (--brand, --bubble, …). */
+[data-chat-theme] {
+  --brand: var(--l-accent);
+  --brand-foreground: var(--l-on-accent);
+  --brand-text: var(--l-accent-text);
+  --mine: var(--l-mine);
+  --mine-foreground: var(--l-on-mine);
+  --bubble: var(--l-theirs);
+  --bubble-foreground: var(--l-on-theirs);
+  --bubble-outline: var(--l-outline);
+  --wall: var(--l-wall);
+  --doodle: var(--l-doodle);
+  --doodle-opacity: var(--l-doodle-opacity);
+}
+.dark [data-chat-theme] {
+  --brand: var(--d-accent);
+  --brand-foreground: var(--d-on-accent);
+  --brand-text: var(--d-accent-text);
+  --mine: var(--d-mine);
+  --mine-foreground: var(--d-on-mine);
+  --bubble: var(--d-theirs);
+  --bubble-foreground: var(--d-on-theirs);
+  --bubble-outline: var(--d-outline);
+  --wall: var(--d-wall);
+  --doodle: var(--d-doodle);
+  --doodle-opacity: var(--d-doodle-opacity);
+}
+/* Over the wallpaper, small surfaces and quiet text take its tones (the header keeps the app's). */
+[data-chat-theme] [data-chat-wall] {
+  --background: var(--l-surface);
+  --muted: var(--l-muted);
+  --muted-foreground: var(--l-meta);
+  --border: var(--l-border);
+}
+.dark [data-chat-theme] [data-chat-wall] {
+  --background: var(--d-surface);
+  --muted: var(--d-muted);
+  --muted-foreground: var(--d-meta);
+  --border: var(--d-border);
+}
+/* "Outline" bubbles: a thin ink line and a small offset shadow, like a die-cut sticker. */
+[data-bubble-style='outline'] [data-bubble] {
+  outline: 1.5px solid var(--bubble-outline);
+  outline-offset: -1.5px;
+  box-shadow: 2px 2.5px 0 var(--bubble-outline);
+}
+/* On dark, a light offset reads as a glow, not a shadow: keep a softer light edge and drop a real
+   shadow under the sticker instead. */
+.dark [data-bubble-style='outline'] [data-bubble] {
+  outline-color: color-mix(in srgb, var(--bubble-outline) 72%, transparent);
+  box-shadow:
+    2px 3px 0 rgb(0 0 0 / 0.55),
+    0 6px 14px -6px rgb(0 0 0 / 0.5);
+}
+/* A group member's own colour on their bubbles and name (memberVars). */
+[data-member] {
+  --bubble: var(--l-member-bubble);
+  --bubble-foreground: var(--l-member-on-bubble);
+  --member-name: var(--l-member-name);
+}
+.dark [data-member] {
+  --bubble: var(--d-member-bubble);
+  --bubble-foreground: var(--d-member-on-bubble);
+  --member-name: var(--d-member-name);
+}
+/* The wallpaper layer carries its own colours, so an outgoing theme fades out in its own. */
+[data-chat-wallpaper] {
+  background: var(--lw);
+  color: var(--ld);
+}
+[data-chat-wallpaper] [data-doodles] {
+  opacity: var(--lo);
+}
+.dark [data-chat-wallpaper] {
+  background: var(--dw);
+  color: var(--dd);
+}
+.dark [data-chat-wallpaper] [data-doodles] {
+  opacity: var(--do);
+}
+/* Theme sheet swatches: each shows its light or dark look with the app. */
+[data-swatch] {
+  background: var(--sw-l);
+  color: var(--sw-on-l);
+}
+.dark [data-swatch] {
+  background: var(--sw-d);
+  color: var(--sw-on-d);
+}
+[data-wall-swatch] {
+  background: var(--lw);
+}
+.dark [data-wall-swatch] {
+  background: var(--dw);
+}
+@keyframes doodles-in {
+  from {
+    opacity: 0;
   }
 }

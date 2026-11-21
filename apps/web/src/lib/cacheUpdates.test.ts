@@ -101,6 +101,10 @@ describe('live event cache updates', () => {
       canMessage: true,
       ownerId: null,
       lastReaction: null,
+      theme: null,
+      themeSetBy: null,
+      themeSetAt: null,
+      memberColors: [],
     };
     client.cache.writeQuery({ query: CONVERSATIONS, data: { conversations: [dm] } });
 

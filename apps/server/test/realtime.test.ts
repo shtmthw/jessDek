@@ -35,7 +35,7 @@ const EVENTS = `subscription { events {
   ... on MessageAdded { conversationId message { body sender { username } } }
   ... on TypingStarted { conversationId user { username } }
   ... on PresenceChanged { userId online }
-  ... on ConversationUpdated { conversationId conversation { title unreadCount } }
+  ... on ConversationUpdated { conversationId conversation { title unreadCount theme themeSetBy { username } memberColors { color } } }
   ... on MediaRequested { requestId conversationId attachmentId part sha256 fromUserId fromPeerId }
   ... on MediaSignal { requestId type payload fromUserId fromPeerId }
   ... on UserUpdated { user { username displayName avatarColor avatar } }
@@ -257,6 +257,39 @@ describe('realtime events', () => {
     await settle();
     expect(types(alice, 'ReactionChanged')).toHaveLength(1);
     expect(types(carolTab, 'ConversationUpdated')).toEqual([]);
+    expect(spy.events).toEqual([]);
+  });
+
+  it('tells every member of a chat about a new theme or member colour, and nobody else', async () => {
+    const { a, b, eve } = await setup();
+    const g = (await a.gql(`mutation { createGroup(name: "Trip", usernames: ["bob"]) { id } }`))
+      .data!.createGroup;
+    const alice = listen(a.cookie);
+    const bob = listen(b.cookie);
+    const spy = listen(eve.cookie);
+    await settle();
+
+    await a.gql(
+      `mutation($c: ID!, $t: String) { setChatTheme(conversationId: $c, theme: $t) { id } }`,
+      {
+        c: g.id,
+        t: JSON.stringify({ v: 1, preset: 'space' }),
+      },
+    );
+    for (const peer of [alice, bob])
+      await until(() => types(peer, 'ConversationUpdated').length === 1);
+    const update = types(bob, 'ConversationUpdated')[0];
+    expect(JSON.parse(update.conversation.theme).preset).toBe('space');
+    expect(update.conversation.themeSetBy.username).toBe('alice');
+
+    await b.gql(`mutation($c: ID!) { setMemberColor(conversationId: $c, color: "rose") { id } }`, {
+      c: g.id,
+    });
+    await until(() => types(alice, 'ConversationUpdated').length === 2);
+    expect(types(alice, 'ConversationUpdated')[1].conversation.memberColors).toEqual([
+      { color: 'rose' },
+    ]);
+    await settle();
     expect(spy.events).toEqual([]);
   });
 

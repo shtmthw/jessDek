@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { Prisma } from '@prisma/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { withCardMeta } from '../src/app.js';
+import { isStaticFileRequest, withCardMeta } from '../src/app.js';
 import { config } from '../src/config.js';
 import { prisma } from '../src/db.js';
 import { Client, newApp, resetDb, signUp } from './helpers.js';
@@ -416,6 +416,33 @@ describe('searchUsers', () => {
     ]);
     expect((await a.gql(Q, { q: '@alb' })).data!.searchUsers).toEqual([{ username: 'albert' }]);
     expect((await a.gql(Q, { q: 'a' })).data!.searchUsers).toEqual([]);
+  });
+});
+
+describe('rate limit', () => {
+  it('never counts the web app’s own files', async () => {
+    // More than the 600-a-minute limit; none of them may be turned away.
+    for (let i = 0; i < 650; i++) {
+      const res = await app.inject({ method: 'GET', url: `/assets/chunk-${i}.js?v=1` });
+      expect(res.statusCode).not.toBe(429);
+    }
+  });
+
+  it('tells files apart from the API and pages', () => {
+    for (const url of ['/assets/index-1a2b.js', '/icon.svg', '/manifest.webmanifest?x=1']) {
+      expect(isStaticFileRequest('GET', url)).toBe(true);
+    }
+    expect(isStaticFileRequest('POST', '/assets/index-1a2b.js')).toBe(false);
+    for (const url of [
+      '/graphql',
+      '/graphql?query=x.y',
+      '/@bob',
+      '/settings',
+      '/',
+      '/media-relay',
+    ]) {
+      expect(isStaticFileRequest('GET', url)).toBe(false);
+    }
   });
 });
 
@@ -1146,5 +1173,137 @@ describe('cards', () => {
   it('needs sign-in to save', async () => {
     const visitor = new Client(app);
     expect(code(await visitor.gql(SAVE, { i: { shared: true } }))).toBe('UNAUTHENTICATED');
+  });
+});
+
+describe('chat themes', () => {
+  const SET = `mutation($c: ID!, $t: String) { setChatTheme(conversationId: $c, theme: $t) { id theme themeSetAt themeSetBy { username } } }`;
+  const COLOR = `mutation($c: ID!, $k: String) { setMemberColor(conversationId: $c, color: $k) { id memberColors { userId color } } }`;
+  const CONVO = `query($c: ID!) { conversation(id: $c) { theme themeSetBy { username } themeSetAt memberColors { userId color } lastMessageAt } }`;
+  const code = (r: { errors?: Array<{ extensions?: { code?: string } }> }) =>
+    r.errors?.[0]?.extensions?.code;
+  const theme = (o: Record<string, unknown>) => JSON.stringify({ v: 1, ...o });
+
+  it('sets a theme everyone in the chat sees, remembers who changed it, and resets with null', async () => {
+    const { a, b } = await twoUsers();
+    const dm = (await a.gql(START_DIRECT, { u: 'bob' })).data!.startDirect;
+    const before = (await b.gql(CONVO, { c: dm.id })).data!.conversation;
+    expect(before.theme).toBeNull();
+    expect(before.themeSetBy).toBeNull();
+
+    const set = await a.gql(SET, { c: dm.id, t: theme({ preset: 'matcha' }) });
+    expect(set.errors).toBeUndefined();
+    expect(JSON.parse(set.data!.setChatTheme.theme)).toEqual({ v: 1, preset: 'matcha' });
+    expect(set.data!.setChatTheme.themeSetBy.username).toBe('alice');
+
+    const seen = (await b.gql(CONVO, { c: dm.id })).data!.conversation;
+    expect(JSON.parse(seen.theme).preset).toBe('matcha');
+    expect(seen.themeSetBy.username).toBe('alice');
+    expect(Date.parse(seen.themeSetAt)).toBeGreaterThan(0);
+    // A theme change is quiet: the chat doesn't move up the list.
+    expect(seen.lastMessageAt).toBe(before.lastMessageAt);
+
+    // Bob can change it too, including a custom theme.
+    const custom = theme({
+      preset: 'custom',
+      accent: 'teal',
+      wall: 'mint',
+      doodle: 'nature',
+      bubble: 'soft',
+    });
+    const byBob = await b.gql(SET, { c: dm.id, t: custom });
+    expect(JSON.parse(byBob.data!.setChatTheme.theme).accent).toBe('teal');
+    expect(byBob.data!.setChatTheme.themeSetBy.username).toBe('bob');
+
+    const reset = await a.gql(SET, { c: dm.id, t: null });
+    expect(reset.data!.setChatTheme.theme).toBeNull();
+    expect(reset.data!.setChatTheme.themeSetBy.username).toBe('alice');
+  });
+
+  it('setting the theme a chat already has changes nothing', async () => {
+    const { a, b } = await twoUsers();
+    const dm = (await a.gql(START_DIRECT, { u: 'bob' })).data!.startDirect;
+    const first = (await a.gql(SET, { c: dm.id, t: theme({ preset: 'ocean' }) })).data!
+      .setChatTheme;
+    const again = (await b.gql(SET, { c: dm.id, t: theme({ preset: 'ocean' }) })).data!
+      .setChatTheme;
+    expect(again.themeSetBy.username).toBe('alice');
+    expect(again.themeSetAt).toBe(first.themeSetAt);
+  });
+
+  it('checks the recipe’s shape and size', async () => {
+    const { a } = await twoUsers();
+    const dm = (await a.gql(START_DIRECT, { u: 'bob' })).data!.startDirect;
+    const bad = [
+      'not json',
+      '[1,2]',
+      theme({}), // no preset
+      theme({ preset: 'Matcha!' }),
+      theme({ preset: 'x', accent: 5 }),
+      theme({ preset: 'x', nested: { a: 1 } }),
+      theme({ preset: 'x', 'bad key': 'a' }),
+      JSON.stringify({ v: 1.5, preset: 'x' }),
+      theme(
+        Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`k${'abcdefghijkl'[i]}`, 'a'])),
+      ),
+      theme({ preset: 'x', a: 'a'.repeat(25) }),
+    ];
+    for (const t of bad) {
+      const r = await a.gql(SET, { c: dm.id, t });
+      expect(code(r), t).toBe('BAD_USER_INPUT');
+    }
+    // Unknown slugs are fine: the client falls back to defaults.
+    const ok = await a.gql(SET, { c: dm.id, t: theme({ preset: 'from-the-future', glow: 'on' }) });
+    expect(ok.errors).toBeUndefined();
+  });
+
+  it('keeps themes to members, and out of blocked direct chats', async () => {
+    const { a, b } = await twoUsers();
+    const eve = new Client(app);
+    await signUp(eve, 'eve');
+    const dm = (await a.gql(START_DIRECT, { u: 'bob' })).data!.startDirect;
+    const r = await eve.gql(SET, { c: dm.id, t: theme({ preset: 'blush' }) });
+    expect(code(r)).toBe('NOT_FOUND');
+
+    const bobId = (await a.gql(`query { searchUsers(query: "bob") { id } }`)).data!.searchUsers[0]
+      .id;
+    await a.gql(`mutation($u: ID!) { blockUser(userId: $u) { id } }`, { u: bobId });
+    for (const who of [a, b]) {
+      const blocked = await who.gql(SET, { c: dm.id, t: theme({ preset: 'blush' }) });
+      expect(code(blocked)).toBe('FORBIDDEN');
+    }
+  });
+
+  it('lets group members pick their own colour, for everyone, and only in groups', async () => {
+    const { a, b } = await twoUsers();
+    const bobId = (await a.gql(`query { searchUsers(query: "bob") { id } }`)).data!.searchUsers[0]
+      .id;
+    const g = (await a.gql(`mutation { createGroup(name: "Trip", usernames: ["bob"]) { id } }`))
+      .data!.createGroup;
+    const picked = await b.gql(COLOR, { c: g.id, k: 'orange' });
+    expect(picked.errors).toBeUndefined();
+    expect(picked.data!.setMemberColor.memberColors).toEqual([{ userId: bobId, color: 'orange' }]);
+    const seen = (await a.gql(CONVO, { c: g.id })).data!.conversation;
+    expect(seen.memberColors).toEqual([{ userId: bobId, color: 'orange' }]);
+
+    const auto = await b.gql(COLOR, { c: g.id, k: null });
+    expect(auto.data!.setMemberColor.memberColors).toEqual([]);
+
+    expect(code(await b.gql(COLOR, { c: g.id, k: 'Orange!' }))).toBe('BAD_USER_INPUT');
+    const dm = (await a.gql(START_DIRECT, { u: 'bob' })).data!.startDirect;
+    expect(code(await a.gql(COLOR, { c: dm.id, k: 'sky' }))).toBe('BAD_USER_INPUT');
+    expect((await a.gql(CONVO, { c: dm.id })).data!.conversation.memberColors).toEqual([]);
+  });
+
+  it('is rate limited', async () => {
+    const { a } = await twoUsers();
+    const dm = (await a.gql(START_DIRECT, { u: 'bob' })).data!.startDirect;
+    const presets = ['ocean', 'blush'];
+    for (let i = 0; i < 30; i++) {
+      const r = await a.gql(SET, { c: dm.id, t: theme({ preset: presets[i % 2] }) });
+      expect(r.errors).toBeUndefined();
+    }
+    const r = await a.gql(SET, { c: dm.id, t: theme({ preset: 'matcha' }) });
+    expect(code(r)).toBe('RATE_LIMITED');
   });
 });

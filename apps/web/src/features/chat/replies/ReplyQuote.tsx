@@ -39,8 +39,8 @@ function KindIcon({ kind }: { kind: 'IMAGE' | 'VIDEO' }) {
 }
 
 /**
- * The quote at the top of a reply bubble. Tapping it jumps to the original. On your own (brand)
- * bubbles it's a soft white inset; on others' it carries the quoted person's colour.
+ * The quote at the top of a reply bubble. Tapping it jumps to the original. On your own bubbles
+ * it's a soft inset in the bubble's text colour; on others' it carries the quoted person's colour.
  */
 export function ReplyQuote({
   quote,
@@ -51,7 +51,7 @@ export function ReplyQuote({
 }: {
   quote: ReplyTo;
   viewerId: string;
-  /** The reply bubble is yours (brand coloured). */
+  /** The reply bubble is yours (accent coloured). */
   mine: boolean;
   onJump?: () => void;
   className?: string;
@@ -71,7 +71,7 @@ export function ReplyQuote({
         'flex w-full min-w-0 items-stretch gap-2 overflow-hidden rounded-[12px] text-left',
         'transition-colors duration-150',
         mine
-          ? 'bg-white/[0.14] hover:bg-white/20'
+          ? 'bg-[color-mix(in_srgb,var(--mine-foreground)_14%,transparent)] hover:bg-[color-mix(in_srgb,var(--mine-foreground)_20%,transparent)]'
           : 'bg-background/75 hover:bg-background dark:bg-white/[0.06] dark:hover:bg-white/10',
         className,
       )}
@@ -79,13 +79,17 @@ export function ReplyQuote({
       <span
         aria-hidden
         className="my-1.5 ml-1.5 w-[3px] shrink-0 rounded-full"
-        style={{ backgroundColor: mine ? 'rgb(255 255 255 / 0.75)' : quote.sender.avatarColor }}
+        style={{
+          backgroundColor: mine
+            ? 'color-mix(in srgb, var(--mine-foreground) 75%, transparent)'
+            : quote.sender.avatarColor,
+        }}
       />
       <span className="min-w-0 flex-1 py-1.5">
         <span
           className={cn(
             'block truncate text-[13px] font-semibold leading-[18px]',
-            mine && 'text-brand-foreground',
+            mine && 'text-mine-foreground',
           )}
           style={mine ? undefined : { color }}
         >
@@ -94,7 +98,7 @@ export function ReplyQuote({
         <span
           className={cn(
             'line-clamp-2 break-words text-[13px] leading-[18px]',
-            mine ? 'text-brand-foreground/85' : 'text-muted-foreground',
+            mine ? 'text-mine-foreground/85' : 'text-muted-foreground',
           )}
         >
           {media && !quote.body.trim() ? <KindIcon kind={media.kind} /> : null}

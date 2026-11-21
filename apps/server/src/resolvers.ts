@@ -12,6 +12,7 @@ import * as messages from './services/messages.js';
 import * as reactions from './services/reactions.js';
 import { blockedBetween, listBlocked } from './services/blocks.js';
 import * as safety from './services/safety.js';
+import * as themes from './services/themes.js';
 import { announceUser, isOnline } from './services/presence.js';
 import * as users from './services/users.js';
 import type { MessageWithSender, ServerEvent } from './types.js';
@@ -86,6 +87,16 @@ export const resolvers = {
       conversations.leaveGroup(requireUser(ctx), conversationId),
     removeMember: (_: unknown, args: { conversationId: string; userId: string }, ctx: Context) =>
       conversations.removeMember(requireUser(ctx), args.conversationId, args.userId),
+    setChatTheme: (
+      _: unknown,
+      args: { conversationId: string; theme?: string | null },
+      ctx: Context,
+    ) => themes.setChatTheme(requireUser(ctx), args.conversationId, args.theme),
+    setMemberColor: (
+      _: unknown,
+      args: { conversationId: string; color?: string | null },
+      ctx: Context,
+    ) => themes.setMemberColor(requireUser(ctx), args.conversationId, args.color),
     hideConversation: (_: unknown, { conversationId }: { conversationId: string }, ctx: Context) =>
       conversations.hideConversation(requireUser(ctx), conversationId),
     muteConversation: (
@@ -180,6 +191,7 @@ export const resolvers = {
   Conversation: {
     lastMessageAt: (c: conversations.ConversationView) => iso(c.lastMessageAt),
     createdAt: (c: conversations.ConversationView) => iso(c.createdAt),
+    themeSetAt: (c: conversations.ConversationView) => (c.themeSetAt ? iso(c.themeSetAt) : null),
   },
 
   Message: {

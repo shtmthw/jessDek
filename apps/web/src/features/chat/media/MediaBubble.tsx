@@ -45,7 +45,7 @@ export function MediaBubble({
         flash && 'message-flash',
         bubbleCorners(mine, first, last),
         'transition-[border-radius,opacity] duration-300 ease-out-quint',
-        mine ? 'bg-brand text-brand-foreground' : 'bg-bubble text-foreground',
+        mine ? 'bg-mine text-mine-foreground' : 'bg-bubble text-bubble-foreground',
         failed && 'opacity-60',
         // Without a caption, a hairline keeps pale photos from dissolving into the page.
         !caption &&
@@ -70,7 +70,7 @@ export function MediaBubble({
           className={cn(
             'w-0 min-w-full whitespace-pre-wrap break-words px-3.5 py-2 text-[15px] leading-[1.42] md:px-4',
             mine
-              ? '[&_a]:text-brand-foreground [&_a]:decoration-white/50'
+              ? '[&_a]:text-mine-foreground [&_a]:decoration-current/50'
               : '[&_a]:text-brand-text [&_a]:decoration-current/40',
           )}
         >

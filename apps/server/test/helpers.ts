@@ -8,6 +8,7 @@ import { cardLimiter } from '../src/services/cards.js';
 import { resetMediaState } from '../src/services/media.js';
 import { sendLimiter, typingLimiter } from '../src/services/messages.js';
 import { reactLimiter } from '../src/services/reactions.js';
+import { themeLimiter } from '../src/services/themes.js';
 import { clearPeers } from '../src/services/peers.js';
 
 export async function resetDb() {
@@ -27,6 +28,7 @@ export async function resetDb() {
   typingLimiter.clear();
   reactLimiter.clear();
   cardLimiter.clear();
+  themeLimiter.clear();
 }
 
 export interface GqlResult<T = Record<string, any>> {

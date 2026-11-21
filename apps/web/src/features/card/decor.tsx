@@ -198,6 +198,23 @@ export function faceMask(border: string, y = TICKET_Y): CSSProperties | undefine
   return { maskImage: undefined, mask: m, WebkitMask: m } as CSSProperties;
 }
 
+const FOIL_WIDTH = 6;
+
+/** A rounded rectangle as an SVG path (corner radius clamped to fit). */
+function roundRectPath(x: number, y: number, w: number, h: number, radius: number): string {
+  const r = Math.max(0, Math.min(radius, w / 2, h / 2));
+  return (
+    `M${x + r} ${y}H${x + w - r}A${r} ${r} 0 0 1 ${x + w} ${y + r}V${y + h - r}` +
+    `A${r} ${r} 0 0 1 ${x + w - r} ${y + h}H${x + r}A${r} ${r} 0 0 1 ${x} ${y + h - r}` +
+    `V${y + r}A${r} ${r} 0 0 1 ${x + r} ${y}Z`
+  );
+}
+
+/** A `t`-wide ring along the edge of a `w`×`h` box with corner radius `r`, for an even-odd fill. */
+export function ringPath(w: number, h: number, r: number, t: number): string {
+  return `${roundRectPath(0, 0, w, h, r)}${roundRectPath(t, t, w - 2 * t, h - 2 * t, r - t)}`;
+}
+
 /** A glow outside the card face (box shadows aren't clipped by the face's own overflow). */
 export function faceShadow(border: string, theme: CardTheme): string | undefined {
   if (border !== 'glow') return undefined;
@@ -291,14 +308,14 @@ export const BorderLayer = memo(function BorderLayer({
         </svg>
       );
     case 'foil':
+      // A 6px ring cut with an even-odd clip path. Not the usual mask-composite trick: Firefox
+      // treats `-webkit-mask` as `mask`, so the prefixed copy overwrote the `exclude` one and the
+      // foil covered the whole card.
       return box({
-        padding: 6,
         background:
           'linear-gradient(125deg, #d9dde6, #f7d6ec 18%, #c8efe2 34%, #fff1bf 50%, #c9d3ff 66%, #f4cfe9 82%, #d9dde6) var(--mx, 50%) var(--my, 50%) / 260% 260%',
-        mask: 'linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0)',
-        WebkitMask: 'linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)',
-        WebkitMaskComposite: 'xor',
-      } as CSSProperties);
+        clipPath: `path(evenodd, "${ringPath(width, height, r, FOIL_WIDTH)}")`,
+      });
     case 'sketch':
       return (
         <svg

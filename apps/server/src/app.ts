@@ -61,7 +61,8 @@ export async function buildApp() {
   await app.register(rateLimit, {
     max: 600,
     timeWindow: '1 minute',
-    allowList: (req) => req.url === '/healthz' || req.url === '/readyz',
+    allowList: (req) =>
+      req.url === '/healthz' || req.url === '/readyz' || isStaticFileRequest(req.method, req.url),
   });
 
   // ---- health ----
@@ -217,6 +218,19 @@ export async function buildApp() {
   }
 
   return app;
+}
+
+/**
+ * A GET for a file of the built web app (`/assets/index-1a2b.js`, `/icon.svg`): exempt from the
+ * per-IP rate limit. They are unchanging files read from disk, so counting them protects nothing,
+ * while one page load fetches a dozen of them: people sharing an IP (an office, a school, every
+ * e2e browser on 127.0.0.1) could otherwise trip the limit and get a blank page of JSON instead
+ * of the app. API routes and pages (`/graphql`, `/@username`) have no extension and stay limited.
+ */
+export function isStaticFileRequest(method: string, url: string): boolean {
+  if (method !== 'GET' && method !== 'HEAD') return false;
+  const path = url.split('?')[0]!;
+  return /\/[^/]+\.[a-z0-9]{1,12}$/i.test(path) && !path.startsWith('/graphql');
 }
 
 const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);

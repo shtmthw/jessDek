@@ -36,6 +36,7 @@ export function Composer({
   replyTo,
   viewerId,
   onCancelReply,
+  onWallpaper,
 }: {
   /** `items` are the photos and videos from the tray (ownership passes to the caller). */
   onSend: (body: string, items?: TrayItem[]) => void;
@@ -49,6 +50,8 @@ export function Composer({
   replyTo?: ReplyTo | null;
   viewerId?: string;
   onCancelReply?: () => void;
+  /** The chat has a wallpaper: let it show around the message box. */
+  onWallpaper?: boolean;
 }) {
   const [value, setValue] = useState(() => (draftKey ? getDraft(draftKey) : ''));
   const [launches, setLaunches] = useState(0);
@@ -133,7 +136,10 @@ export function Composer({
         e.preventDefault();
         submit();
       }}
-      className="chat-column shrink-0 bg-background pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-1.5 md:pb-4"
+      className={cn(
+        'chat-column shrink-0 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-1.5 md:pb-4',
+        !onWallpaper && 'bg-background',
+      )}
     >
       <AnimatePresence initial={false}>
         {hasMedia && !introSeen ? (

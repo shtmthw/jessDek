@@ -25,6 +25,7 @@ import { formatListTime } from '@/lib/time';
 import { useTypingNames } from '../realtime/typing';
 import { useViewer } from '../session/ViewerProvider';
 import { reactionPreviewText } from '@/lib/reactionText';
+import { themePreviewText } from '../theme/notice';
 
 /** "Photo", "3 photos", "Video"… with a small icon, then the caption if there is one. */
 function MediaPreview({
@@ -50,6 +51,9 @@ function MediaPreview({
 }
 
 function preview(c: Conversation, viewerId: string): React.ReactNode {
+  // A theme change newer than anything else takes the line (quietly, like reactions).
+  const themed = themePreviewText(c, viewerId);
+  if (themed) return themed;
   // A reaction by you or on your message, newer than the last message, takes the line (quietly).
   const reacted = reactionPreviewText(c.lastReaction, c.lastMessage, viewerId);
   if (reacted) return reacted;

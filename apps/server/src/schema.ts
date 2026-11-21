@@ -62,6 +62,10 @@ export const typeDefs = /* GraphQL */ `
     leaveGroup(conversationId: ID!): Boolean!
     "Group owners only. Their earlier messages stay."
     removeMember(conversationId: ID!, userId: ID!): Conversation!
+    "Sets the chat's theme for everyone in it (JSON recipe). Null goes back to Classic."
+    setChatTheme(conversationId: ID!, theme: String): Conversation!
+    "Group chats: your own colour there, for everyone. Null goes back to automatic."
+    setMemberColor(conversationId: ID!, color: String): Conversation!
     "Direct chats only: removes it from your list until something new happens in it."
     hideConversation(conversationId: ID!): Boolean!
     "Muted chats make no sound and aren't counted in the tab title."
@@ -190,6 +194,20 @@ export const typeDefs = /* GraphQL */ `
     ownerId: ID
     "The newest reaction you made or one on your message, if newer than the last message."
     lastReaction: ReactionPreview
+    "Chat theme recipe (JSON), the same for everyone in the chat. Null means Classic."
+    theme: String
+    "Who last changed the theme."
+    themeSetBy: User
+    "When the theme was last changed (ISO 8601)."
+    themeSetAt: String
+    "Groups: the colours members picked for themselves (the others are automatic)."
+    memberColors: [MemberColor!]!
+  }
+
+  type MemberColor {
+    userId: ID!
+    "A colour slug."
+    color: String!
   }
 
   type Message {

@@ -4,6 +4,8 @@ import {
   Crown,
   LogOut,
   MoreHorizontal,
+  ChevronRight,
+  Palette,
   Pencil,
   ShieldCheck,
   UserMinus,
@@ -33,6 +35,7 @@ import { UserPicker } from '../conversations/NewChatDialog';
 import { useOpenCard } from '../card/CardDialogProvider';
 import { useViewer } from '../session/ViewerProvider';
 import { useChatActions } from './useChatActions';
+import { parseTheme, themeSpec } from '../theme/recipe';
 
 const messageOf = (err: unknown) =>
   (err as { graphQLErrors?: Array<{ message: string }> }).graphQLErrors?.[0]?.message ??
@@ -49,12 +52,16 @@ export function GroupInfoDialog({
   conversation,
   open,
   onOpenChange,
+  onOpenTheme,
 }: {
   conversation: Conversation;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Opens the theme sheet (theme and your colour). */
+  onOpenTheme?: () => void;
 }) {
   const viewer = useViewer();
+  const themeLabel = themeSpec(parseTheme(conversation.theme)).label;
   const openCard = useOpenCard();
   const client = useApolloClient();
   const navigate = useNavigate();
@@ -176,6 +183,23 @@ export function GroupInfoDialog({
           aria-labelledby="group-mute-label"
         />
       </div>
+
+      {onOpenTheme ? (
+        <button
+          type="button"
+          onClick={onOpenTheme}
+          className="-mx-1 mb-6 flex min-h-12 w-[calc(100%+0.5rem)] items-center gap-3 rounded-xl px-1 py-1.5 text-left transition-colors hover:bg-muted/70"
+        >
+          <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+            <Palette className="size-[18px]" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-medium">Theme and your colour</span>
+            <span className="block truncate text-xs text-muted-foreground">{themeLabel}</span>
+          </span>
+          <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+        </button>
+      ) : null}
 
       <h3 className="mb-1.5 text-sm font-semibold">Members</h3>
       <ul className="-mx-1 mb-4 space-y-0.5">

@@ -89,6 +89,25 @@ Every card is the same size, so long text shrinks to fit. Each card has a link, 
 
 </div>
 
+## Chat themes
+
+Every chat, direct or group, can have a **theme**: a wallpaper of soft colour with fine-line doodles in the avatar style, an accent for your bubbles, the send button and links, and a bubble style. Open a chat's menu and pick **Theme**. The chat behind the sheet shows each choice live, and closing without saving keeps the old theme.
+
+- **Shared.** Everyone in the chat sees the same theme, and anyone in it can change it. The chat then shows a quiet line such as "Alice changed the theme to Matcha · Change", and the chat list mentions it too. Like reactions, a theme change makes no sound and doesn't count as unread.
+- **17 presets:** Classic (the default look), Doodles, Blush, Matcha, Lemonade, Ocean, Lavender, Peach, Candy, Snacks, Space, Pets, Sunset, Notebook, Arcade, Soda and Mixtape.
+- **Custom:** choose from 14 accents and 19 wallpapers (solids and gradients). Add one of 16 doodle patterns, from simple hearts, stars and waves to line-art scatters of snacks, pets, space and music. Then pick a bubble style: **solid**, **soft** (a light wash of the accent) or **outline** (a thin ink outline, like a sticker).
+- **Light and dark.** Every theme has a hand-tuned dark version and follows the app's light or dark setting. A contrast test checks the text in every preset and custom combination, in both modes.
+- **Member colours in groups.** Each member gets their own colour for their name, a tint on their bubbles, and the bar of a quote of their messages. Colours are assigned from a palette of 10 in join order, and anyone can pick their own for that group in **Group info → Your colour**.
+
+Like avatars and cards, a theme is a small recipe (at most 512 bytes of JSON) stored on the chat and drawn by the browser. Chats nobody has themed keep the Classic look.
+
+<div align="center">
+
+<img src="docs/screenshots/theme-sheet-light.png" alt="The theme sheet over a direct chat, showing the preset tiles" width="620">
+<img src="docs/screenshots/group-theme-dark.png" alt="A group chat with the Matcha theme and member colours, dark theme" width="620">
+
+</div>
+
 ## Screenshots
 
 <div align="center">

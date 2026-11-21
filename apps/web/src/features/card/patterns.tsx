@@ -2,7 +2,7 @@ import { memo, useId, type ReactNode } from 'react';
 import { heartPath, starPath } from '../avatar/art';
 
 /** Repeating background patterns. Each tile is drawn in one colour; the card sets its opacity. */
-interface Tile {
+export interface Tile {
   w: number;
   h?: number;
   draw: (c: string) => ReactNode;
@@ -42,7 +42,8 @@ const SPRINKLES: Array<[number, number, number]> = [
   [36, 36, 15],
 ];
 
-const TILES: Record<string, Tile> = {
+/** The repeating tiles, by pattern id (chat wallpapers reuse them; see theme/doodles.tsx). */
+export const TILES: Record<string, Tile> = {
   dots: {
     w: 20,
     draw: (c) => (

@@ -7,11 +7,22 @@ import {
   Info,
   MessageSquareOff,
   MoreHorizontal,
+  Palette,
   ShieldCheck,
   Trash2,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentType,
+  type CSSProperties,
+} from 'react';
 import { Link, useParams } from 'react-router';
 import { toast } from 'sonner';
 import { Avatar } from '@/components/Avatar';
@@ -54,6 +65,15 @@ import { useOpenCard } from '../card/CardDialogProvider';
 import { useReact } from './reactions/useReact';
 import { toReplyTo } from './replies/quote';
 import { getReply, setReply, useReply } from './replies/replyStore';
+import { ChatThemeProvider, ChatWallpaper } from '../theme/ChatWallpaper';
+import { themeChangeText } from '../theme/notice';
+import { parseTheme, themeSpec, type ThemeSpec } from '../theme/recipe';
+import { assignMemberColors, memberVars, themeVars } from '../theme/resolve';
+
+// The theme sheet is its own chunk, loaded the first time it opens.
+const ThemeSheet = lazy(() =>
+  import('../theme/ThemeSheet').then((m) => ({ default: m.ThemeSheet })),
+);
 
 // The viewer is its own chunk, loaded as soon as a chat has something to open. It's kept out of
 // React.lazy on purpose: a suspended first open leaves the tile's spot empty for React's 300 ms
@@ -163,11 +183,44 @@ function ChatScreen({ id }: { id: string }) {
   const replyTo = useReply(id);
   const react = useReact();
   const [jump, setJump] = useState<{ id: string; nonce: number } | null>(null);
+  const [themeOpen, setThemeOpenState] = useState(false);
+  /** Mounted from the first open on, so the sheet can animate out. */
+  const [themeMounted, setThemeMounted] = useState(false);
+  const setThemeOpen = useCallback((open: boolean) => {
+    if (open) setThemeMounted(true);
+    setThemeOpenState(open);
+  }, []);
+  /** The theme being tried in the theme sheet, shown in the chat until it's set or dropped. */
+  const [trying, setTrying] = useState<ThemeSpec | null>(null);
 
   const { data: list, loading: listLoading } = useQuery(CONVERSATIONS, {
     fetchPolicy: 'cache-first',
   });
   const conversation = list?.conversations.find((c) => c.id === id);
+
+  // The chat's theme (or the one being tried), and in groups each member's colour.
+  const savedTheme = conversation?.theme ?? null;
+  const spec = useMemo(() => trying ?? themeSpec(parseTheme(savedTheme)), [trying, savedTheme]);
+  const themeStyle = useMemo(() => themeVars(spec) as CSSProperties, [spec]);
+  const members = conversation?.members;
+  const picked = conversation?.memberColors;
+  const groupChat = conversation?.type === 'GROUP';
+  const memberStyle = useMemo(() => {
+    if (!groupChat || !members) return undefined;
+    const colors = assignMemberColors(
+      members.map((m) => m.id),
+      picked ?? [],
+      spec.accent,
+    );
+    const cache = new Map<string, CSSProperties>();
+    return (userId: string) => {
+      const color = colors.get(userId);
+      if (!color) return undefined;
+      let style = cache.get(color);
+      if (!style) cache.set(color, (style = memberVars(spec, color) as CSSProperties));
+      return style;
+    };
+  }, [groupChat, members, picked, spec]);
 
   const { data, error, fetchMore, loading } = useQuery(MESSAGES, {
     variables: { conversationId: id, limit: PAGE_SIZE },
@@ -589,6 +642,16 @@ function ChatScreen({ id }: { id: string }) {
     </motion.div>
   );
 
+  const noticeText = themeChangeText(conversation, viewer.id);
+  const notice =
+    noticeText && conversation.themeSetAt
+      ? {
+          at: conversation.themeSetAt,
+          text: noticeText,
+          onChange: conversation.canMessage ? () => setThemeOpen(true) : undefined,
+        }
+      : null;
+
   const intro = (
     <div className="flex flex-col items-center gap-1 pb-4 pt-8 text-center">
       <Avatar
@@ -608,186 +671,232 @@ function ChatScreen({ id }: { id: string }) {
   );
 
   return (
-    <motion.section
-      className="relative flex h-full min-h-0 flex-col"
-      aria-label={`Chat with ${conversation.title}`}
-      {...(mediaEnabled ? drop.handlers : {})}
-      initial={desktop ? { opacity: 0 } : false}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.2, ease: easeOut }}
-    >
-      <header className="relative z-20 flex h-[calc(4rem+env(safe-area-inset-top))] shrink-0 items-center gap-1 border-b border-border/80 bg-background px-2 pt-[env(safe-area-inset-top)] md:px-4">
-        <Link
-          to="/"
-          aria-label="Back to chats"
-          className="inline-flex size-11 items-center justify-center rounded-xl text-foreground transition-colors hover:bg-muted md:hidden"
-        >
-          <ArrowLeft className="size-5" />
-        </Link>
-        {isGroup ? (
-          <button
-            type="button"
-            onClick={() => setInfoOpen(true)}
-            className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-1.5 py-1.5 text-left transition-colors hover:bg-muted/70"
+    <ChatThemeProvider value={{ spec }}>
+      <motion.section
+        className="relative flex h-full min-h-0 flex-col"
+        aria-label={`Chat with ${conversation.title}`}
+        data-chat-theme={spec.classic ? undefined : spec.id}
+        data-bubble-style={spec.bubble}
+        style={themeStyle}
+        {...(mediaEnabled ? drop.handlers : {})}
+        initial={desktop ? { opacity: 0 } : false}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.2, ease: easeOut }}
+      >
+        <header className="relative z-20 flex h-[calc(4rem+env(safe-area-inset-top))] shrink-0 items-center gap-1 border-b border-border/80 bg-background px-2 pt-[env(safe-area-inset-top)] md:px-4">
+          <Link
+            to="/"
+            aria-label="Back to chats"
+            className="inline-flex size-11 items-center justify-center rounded-xl text-foreground transition-colors hover:bg-muted md:hidden"
           >
-            {identity}
-          </button>
-        ) : peer ? (
-          <button
-            type="button"
-            onClick={() => openCard(peer)}
-            aria-label={`${conversation.title}, see their card`}
-            className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-1.5 py-1.5 text-left transition-colors hover:bg-muted/70"
-          >
-            {identity}
-          </button>
-        ) : (
-          <div className="flex min-w-0 flex-1 items-center gap-3 px-1.5 py-1.5">{identity}</div>
-        )}
-        {conversation.muted ? (
-          <BellOff className="size-4 shrink-0 text-muted-foreground" aria-label="Muted" />
-        ) : null}
-        <Menu
-          trigger={
-            <Button variant="ghost" size="icon" aria-label="Chat options" title="Chat options">
-              <MoreHorizontal className="size-5" />
-            </Button>
-          }
-        >
+            <ArrowLeft className="size-5" />
+          </Link>
           {isGroup ? (
-            <MenuItem icon={Info} onSelect={() => setInfoOpen(true)}>
-              Group info
-            </MenuItem>
+            <button
+              type="button"
+              onClick={() => setInfoOpen(true)}
+              className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-1.5 py-1.5 text-left transition-colors hover:bg-muted/70"
+            >
+              {identity}
+            </button>
+          ) : peer ? (
+            <button
+              type="button"
+              onClick={() => openCard(peer)}
+              aria-label={`${conversation.title}, see their card`}
+              className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-1.5 py-1.5 text-left transition-colors hover:bg-muted/70"
+            >
+              {identity}
+            </button>
+          ) : (
+            <div className="flex min-w-0 flex-1 items-center gap-3 px-1.5 py-1.5">{identity}</div>
+          )}
+          {conversation.muted ? (
+            <BellOff className="size-4 shrink-0 text-muted-foreground" aria-label="Muted" />
           ) : null}
-          <MenuItem
-            icon={conversation.muted ? Bell : BellOff}
-            onSelect={() => void actions.mute(conversation, !conversation.muted)}
+          <Menu
+            trigger={
+              <Button variant="ghost" size="icon" aria-label="Chat options" title="Chat options">
+                <MoreHorizontal className="size-5" />
+              </Button>
+            }
           >
-            {conversation.muted ? 'Unmute notifications' : 'Mute notifications'}
-          </MenuItem>
-          {peer ? (
-            <>
-              <MenuSeparator />
-              {conversation.blockedByMe ? (
-                <MenuItem icon={ShieldCheck} onSelect={() => void actions.unblock(peer)}>
-                  Unblock {firstName(peer.displayName)}
-                </MenuItem>
-              ) : (
-                <MenuItem icon={Ban} danger onSelect={() => void actions.block(peer)}>
-                  Block {firstName(peer.displayName)}
-                </MenuItem>
-              )}
-              <MenuItem icon={Trash2} danger onSelect={() => void actions.hide(conversation)}>
-                Remove chat
+            {isGroup ? (
+              <MenuItem icon={Info} onSelect={() => setInfoOpen(true)}>
+                Group info
               </MenuItem>
-            </>
-          ) : null}
-        </Menu>
-      </header>
-
-      {error && !data ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-8 text-center">
-          <p className="font-semibold">Couldn’t load messages</p>
-          <p className="text-sm text-muted-foreground">Check your connection, then try again.</p>
-          <Button
-            variant="secondary"
-            onClick={() => void client.refetchQueries({ include: ['Messages'] })}
-          >
-            Try again
-          </Button>
-        </div>
-      ) : loading && !data ? (
-        <MessagesSkeleton />
-      ) : (
-        <OpenMediaContext.Provider
-          value={viewerIndex >= 0 ? (viewerEntries[viewerIndex]?.item.key ?? null) : null}
-        >
-          <MessageList
-            messages={display}
-            viewerId={viewer.id}
-            conversationId={id}
-            memberName={(userId) => conversation.members.find((m) => m.id === userId)?.displayName}
-            onOpenMedia={openMedia}
-            isGroup={isGroup}
-            hasMore={hasMore}
-            loadingMore={loadingMore}
-            onLoadMore={loadMore}
-            onRetry={retry}
-            onDiscard={discard}
-            typing={typers}
-            firstUnreadId={firstUnread.current ?? undefined}
-            intro={intro}
-            empty={empty}
-            canAct={conversation.canMessage}
-            members={conversation.members}
-            onReply={startReply}
-            onReact={react}
-            onJump={(messageId) => void jumpTo(messageId)}
-            jump={jump}
-          />
-        </OpenMediaContext.Provider>
-      )}
-
-      {conversation.canMessage ? (
-        <Composer
-          key={id}
-          draftKey={id}
-          autoFocus
-          onSend={sendFromComposer}
-          replyTo={replyTo}
-          viewerId={viewer.id}
-          onCancelReply={() => setReply(id, null)}
-          onTyping={typingPing}
-          placeholder={`Message ${isGroup ? conversation.title : firstName(conversation.title)}`}
-        />
-      ) : (
-        // A block (either way) ends the conversation; whoever blocked can undo it right here.
-        <motion.div
-          className="chat-column shrink-0 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-1.5 md:pb-4"
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={spring.soft}
-        >
-          <div
-            role="status"
-            className="flex min-h-13 items-center justify-center gap-3 rounded-[1.5rem] bg-muted/70 px-4 py-2 text-center text-sm text-muted-foreground"
-          >
-            {conversation.blockedByMe && peer ? (
+            ) : null}
+            {conversation.canMessage ? (
+              <MenuItem icon={Palette} onSelect={() => setThemeOpen(true)}>
+                Theme
+              </MenuItem>
+            ) : null}
+            <MenuItem
+              icon={conversation.muted ? Bell : BellOff}
+              onSelect={() => void actions.mute(conversation, !conversation.muted)}
+            >
+              {conversation.muted ? 'Unmute notifications' : 'Mute notifications'}
+            </MenuItem>
+            {peer ? (
               <>
-                <span>You blocked {firstName(peer.displayName)}.</span>
-                <Button variant="secondary" size="sm" onClick={() => void actions.unblock(peer)}>
-                  Unblock
-                </Button>
+                <MenuSeparator />
+                {conversation.blockedByMe ? (
+                  <MenuItem icon={ShieldCheck} onSelect={() => void actions.unblock(peer)}>
+                    Unblock {firstName(peer.displayName)}
+                  </MenuItem>
+                ) : (
+                  <MenuItem icon={Ban} danger onSelect={() => void actions.block(peer)}>
+                    Block {firstName(peer.displayName)}
+                  </MenuItem>
+                )}
+                <MenuItem icon={Trash2} danger onSelect={() => void actions.hide(conversation)}>
+                  Remove chat
+                </MenuItem>
               </>
-            ) : (
-              <span>You can’t reply to this conversation.</span>
-            )}
-          </div>
-        </motion.div>
-      )}
+            ) : null}
+          </Menu>
+        </header>
 
-      {isGroup ? (
-        <GroupInfoDialog conversation={conversation} open={infoOpen} onOpenChange={setInfoOpen} />
-      ) : null}
+        <div data-chat-wall className="relative isolate flex min-h-0 flex-1 flex-col">
+          <ChatWallpaper spec={spec} />
+          {error && !data ? (
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 px-8 text-center">
+              <p className="font-semibold">Couldn’t load messages</p>
+              <p className="text-sm text-muted-foreground">
+                Check your connection, then try again.
+              </p>
+              <Button
+                variant="secondary"
+                onClick={() => void client.refetchQueries({ include: ['Messages'] })}
+              >
+                Try again
+              </Button>
+            </div>
+          ) : loading && !data ? (
+            <MessagesSkeleton />
+          ) : (
+            <OpenMediaContext.Provider
+              value={viewerIndex >= 0 ? (viewerEntries[viewerIndex]?.item.key ?? null) : null}
+            >
+              <MessageList
+                messages={display}
+                viewerId={viewer.id}
+                conversationId={id}
+                memberName={(userId) =>
+                  conversation.members.find((m) => m.id === userId)?.displayName
+                }
+                onOpenMedia={openMedia}
+                isGroup={isGroup}
+                hasMore={hasMore}
+                loadingMore={loadingMore}
+                onLoadMore={loadMore}
+                onRetry={retry}
+                onDiscard={discard}
+                typing={typers}
+                firstUnreadId={firstUnread.current ?? undefined}
+                intro={intro}
+                empty={empty}
+                canAct={conversation.canMessage}
+                members={conversation.members}
+                onReply={startReply}
+                onReact={react}
+                onJump={(messageId) => void jumpTo(messageId)}
+                jump={jump}
+                memberStyle={memberStyle}
+                notice={notice}
+              />
+            </OpenMediaContext.Provider>
+          )}
 
-      <AnimatePresence>
-        {drop.dragging && mediaEnabled ? (
-          <DropOverlay
-            key="drop"
-            name={isGroup ? conversation.title : firstName(conversation.title)}
+          {conversation.canMessage ? (
+            <Composer
+              key={id}
+              draftKey={id}
+              autoFocus
+              onSend={sendFromComposer}
+              replyTo={replyTo}
+              viewerId={viewer.id}
+              onCancelReply={() => setReply(id, null)}
+              onTyping={typingPing}
+              placeholder={`Message ${isGroup ? conversation.title : firstName(conversation.title)}`}
+              onWallpaper={!spec.classic}
+            />
+          ) : (
+            // A block (either way) ends the conversation; whoever blocked can undo it right here.
+            <motion.div
+              className="chat-column shrink-0 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-1.5 md:pb-4"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={spring.soft}
+            >
+              <div
+                role="status"
+                className="flex min-h-13 items-center justify-center gap-3 rounded-[1.5rem] bg-muted/70 px-4 py-2 text-center text-sm text-muted-foreground"
+              >
+                {conversation.blockedByMe && peer ? (
+                  <>
+                    <span>You blocked {firstName(peer.displayName)}.</span>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => void actions.unblock(peer)}
+                    >
+                      Unblock
+                    </Button>
+                  </>
+                ) : (
+                  <span>You can’t reply to this conversation.</span>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </div>
+
+        {isGroup ? (
+          <GroupInfoDialog
+            conversation={conversation}
+            open={infoOpen}
+            onOpenChange={setInfoOpen}
+            onOpenTheme={() => {
+              setInfoOpen(false);
+              setThemeOpen(true);
+            }}
           />
         ) : null}
-      </AnimatePresence>
 
-      {Viewer && viewerIndex >= 0 && viewerEntries[viewerIndex] ? (
-        <Viewer
-          entries={viewerEntries}
-          index={viewerIndex}
-          conversationId={id}
-          onIndexChange={stepViewer}
-          onClose={() => setLightbox(null)}
-        />
-      ) : null}
-    </motion.section>
+        {themeMounted ? (
+          <Suspense fallback={null}>
+            <ThemeSheet
+              conversation={conversation}
+              open={themeOpen}
+              onOpenChange={(open) => {
+                setThemeOpen(open);
+                if (!open) setTrying(null);
+              }}
+              onTry={setTrying}
+            />
+          </Suspense>
+        ) : null}
+
+        <AnimatePresence>
+          {drop.dragging && mediaEnabled ? (
+            <DropOverlay
+              key="drop"
+              name={isGroup ? conversation.title : firstName(conversation.title)}
+            />
+          ) : null}
+        </AnimatePresence>
+
+        {Viewer && viewerIndex >= 0 && viewerEntries[viewerIndex] ? (
+          <Viewer
+            entries={viewerEntries}
+            index={viewerIndex}
+            conversationId={id}
+            onIndexChange={stepViewer}
+            onClose={() => setLightbox(null)}
+          />
+        ) : null}
+      </motion.section>
+    </ChatThemeProvider>
   );
 }
