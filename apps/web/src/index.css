@@ -357,13 +357,9 @@
   outline-offset: -1.5px;
   box-shadow: 2px 2.5px 0 var(--bubble-outline);
 }
-/* On dark, a light offset reads as a glow, not a shadow: keep a softer light edge and drop a real
-   shadow under the sticker instead. */
+/* Dark: the same sticker in chalk (--bubble-outline is a light grey there), a touch deeper. */
 .dark [data-bubble-style='outline'] [data-bubble] {
-  outline-color: color-mix(in srgb, var(--bubble-outline) 72%, transparent);
-  box-shadow:
-    2px 3px 0 rgb(0 0 0 / 0.55),
-    0 6px 14px -6px rgb(0 0 0 / 0.5);
+  box-shadow: 2.5px 3px 0 var(--bubble-outline);
 }
 /* A group member's own colour on their bubbles and name (memberVars). */
 [data-member] {

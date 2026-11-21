@@ -176,7 +176,9 @@ export function resolveTheme(spec: ThemeSpec, mode: Mode): ThemeTokens {
     onMine,
     theirs,
     onTheirs,
-    outline: dark ? mix(wallBase, WHITE, 0.55) : INK,
+    // Dark: a soft chalk, the mirror of the light style's black ink (a mid grey read as a
+    // faint border, not a sticker).
+    outline: dark ? mix(wallBase, WHITE, 0.75) : INK,
     meta,
     surface,
     muted: dark ? mix(wallBase, WHITE, 0.1) : mix(wallBase, INK, 0.06),

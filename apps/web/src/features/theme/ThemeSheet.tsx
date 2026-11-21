@@ -88,18 +88,33 @@ export function ThemeSheet({
     wasOpen.current = open;
   }, [open, saved, savedColor]);
 
-  // The pinned preview gets its hairline once the options scroll under it.
+  // The pinned preview gets its hairline once the options scroll under it. The scroller is also
+  // told how much of it the pinned preview and footer cover (scroll padding), so an option brought
+  // into view by the keyboard lands where it can be seen, not under either of them.
   const [stuck, setStuck] = useState(false);
   const unpin = useRef<(() => void) | null>(null);
   const pinned = useCallback((node: HTMLDivElement | null) => {
     unpin.current?.();
     unpin.current = null;
     const scroller = node?.parentElement?.closest<HTMLElement>('.overflow-y-auto');
-    if (!scroller) return;
+    if (!node || !scroller) return;
     const onScroll = () => setStuck(scroller.scrollTop > 4);
+    const pad = () => {
+      const footer = scroller.querySelector<HTMLElement>('[data-sheet-footer]');
+      scroller.style.scrollPaddingTop = `${node.offsetHeight + 8}px`;
+      scroller.style.scrollPaddingBottom = `${(footer?.offsetHeight ?? 0) + 8}px`;
+    };
     onScroll();
+    pad();
+    const ro = new ResizeObserver(pad);
+    ro.observe(node);
     scroller.addEventListener('scroll', onScroll, { passive: true });
-    unpin.current = () => scroller.removeEventListener('scroll', onScroll);
+    unpin.current = () => {
+      ro.disconnect();
+      scroller.removeEventListener('scroll', onScroll);
+      scroller.style.scrollPaddingTop = '';
+      scroller.style.scrollPaddingBottom = '';
+    };
   }, []);
 
   const themeChanged = !sameTheme(draft, saved);
@@ -228,7 +243,10 @@ export function ThemeSheet({
           </motion.div>
         </AnimatePresence>
 
-        <div className="sticky -bottom-5 z-10 -mx-5 -mb-5 flex justify-end gap-2 border-t border-border bg-background px-5 py-3">
+        <div
+          data-sheet-footer
+          className="sticky -bottom-5 z-10 -mx-5 -mb-5 flex justify-end gap-2 border-t border-border bg-background px-5 py-3"
+        >
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
