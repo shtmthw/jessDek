@@ -3,7 +3,9 @@ import { z } from 'zod';
 import { prisma } from '../db.js';
 import { fail, parseInput } from '../errors.js';
 import { publishToUsers } from '../pubsub.js';
-import type { MessageWithSender } from '../types.js';
+import { blockedBetween, hasBlocked } from './blocks.js';
+import { cancelRequestsFor } from './media.js';
+import { messageInclude, type MessageWithSender } from '../types.js';
 
 export interface ConversationView {
   id: string;
@@ -16,7 +18,40 @@ export interface ConversationView {
   lastMessageAt: Date;
   unreadCount: number;
   createdAt: Date;
+  /** The viewer muted it: no sounds, not in the tab title. */
+  muted: boolean;
+  /** The viewer removed this direct chat from their list (it returns with the next message). */
+  hidden: boolean;
+  /** Direct chats: the viewer blocked the other person. */
+  blockedByMe: boolean;
+  /** False in a direct chat where either person blocked the other. */
+  canMessage: boolean;
+  /** Groups: the member who can rename it and remove people. */
+  ownerId: string | null;
+  /** The newest reaction by the viewer or on the viewer's message, if newer than the last message. */
+  lastReaction: ReactionPreviewRow | null;
 }
+
+const reactionPreviewInclude = {
+  user: true,
+  message: { include: messageInclude },
+} satisfies Prisma.ReactionInclude;
+
+export type ReactionPreviewRow = Prisma.ReactionGetPayload<{
+  include: typeof reactionPreviewInclude;
+}>;
+
+/** What the chat list says about reactions: only yours, or ones on your messages. */
+const lastReactionFor = (userId: string, conversationId: string, after: Date) =>
+  prisma.reaction.findFirst({
+    where: {
+      updatedAt: { gt: after },
+      message: { conversationId },
+      OR: [{ userId }, { message: { senderId: userId } }],
+    },
+    orderBy: { updatedAt: 'desc' },
+    include: reactionPreviewInclude,
+  });
 
 const groupNameSchema = z
   .string({ required_error: 'Give the group a name' })
@@ -33,7 +68,7 @@ const include = {
   messages: {
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     take: 1,
-    include: { sender: true },
+    include: messageInclude,
   },
 } satisfies Prisma.ConversationInclude;
 
@@ -52,6 +87,9 @@ async function toView(userId: string, row: Row): Promise<ConversationView> {
     : 0;
   const members = row.members.map((m) => m.user);
   const peer = row.type === 'DIRECT' ? (members.find((u) => u.id !== userId) ?? null) : null;
+  const blockedByMe = peer ? await hasBlocked(userId, peer.id) : false;
+  const canMessage =
+    row.type === 'GROUP' || (peer !== null && !(await blockedBetween(userId, peer.id)));
   return {
     id: row.id,
     type: row.type,
@@ -63,6 +101,12 @@ async function toView(userId: string, row: Row): Promise<ConversationView> {
     lastMessageAt: row.lastMessageAt,
     unreadCount,
     createdAt: row.createdAt,
+    muted: Boolean(me?.mutedAt),
+    hidden: Boolean(me?.hiddenAt),
+    blockedByMe,
+    canMessage,
+    ownerId: row.members.find((m) => m.role === 'OWNER')?.userId ?? null,
+    lastReaction: await lastReactionFor(userId, row.id, row.lastMessageAt),
   };
 }
 
@@ -88,7 +132,8 @@ export async function memberIds(conversationId: string): Promise<string[]> {
 
 export async function listConversations(userId: string): Promise<ConversationView[]> {
   const rows = await prisma.conversation.findMany({
-    where: { members: { some: { userId } } },
+    // Direct chats you removed stay out of the list until something new happens in them.
+    where: { members: { some: { userId, hiddenAt: null } } },
     orderBy: { lastMessageAt: 'desc' },
     include,
   });
@@ -113,6 +158,13 @@ async function requireView(userId: string, id: string): Promise<ConversationView
   return view;
 }
 
+/** People who blocked `userId` can't be put in a group by them. */
+async function refuseBlockers(userId: string, users: User[]) {
+  for (const u of users) {
+    if (await hasBlocked(u.id, userId)) throw fail('FORBIDDEN', `${u.displayName} can’t be added`);
+  }
+}
+
 async function usersByUsername(usernames: string[]): Promise<User[]> {
   const unique = [...new Set(usernames)];
   const users = await prisma.user.findMany({ where: { username: { in: unique } } });
@@ -135,6 +187,9 @@ export async function startDirect(userId: string, username: string): Promise<Con
   const directKey = [userId, other.id].sort().join(':');
   let conversation = await prisma.conversation.findUnique({ where: { directKey } });
   let created = false;
+  // Someone who blocked you can't be reached by a new chat. (An existing one still opens.)
+  if (!conversation && (await hasBlocked(other.id, userId)))
+    throw fail('FORBIDDEN', 'You can’t message this person');
   if (!conversation) {
     try {
       conversation = await prisma.conversation.create({
@@ -154,7 +209,13 @@ export async function startDirect(userId: string, username: string): Promise<Con
     }
   }
   if (!conversation) throw fail('NOT_FOUND', 'Conversation not found');
+  // Starting a chat you had removed brings it back.
+  const unhidden = await prisma.conversationMember.updateMany({
+    where: { conversationId: conversation.id, userId, hiddenAt: { not: null } },
+    data: { hiddenAt: null },
+  });
   if (created) notify([userId, other.id], conversation.id);
+  else if (unhidden.count > 0) notify([userId], conversation.id);
   return requireView(userId, conversation.id);
 }
 
@@ -170,6 +231,7 @@ export async function createGroup(
   const users = (await usersByUsername(handles)).filter((u) => u.id !== userId);
   if (users.length === 0)
     throw fail('BAD_USER_INPUT', 'Pick at least one person other than yourself');
+  await refuseBlockers(userId, users);
 
   const conversation = await prisma.conversation.create({
     data: {
@@ -207,6 +269,7 @@ export async function addMembers(
   const existing = new Set(await memberIds(conversationId));
   const fresh = users.filter((u) => !existing.has(u.id));
   if (fresh.length === 0) throw fail('CONFLICT', 'They’re already in this group');
+  await refuseBlockers(userId, fresh);
 
   await prisma.conversationMember.createMany({
     data: fresh.map((u) => ({ conversationId, userId: u.id })),
@@ -233,6 +296,7 @@ export async function leaveGroup(userId: string, conversationId: string): Promis
   await prisma.conversationMember.delete({
     where: { conversationId_userId: { conversationId, userId } },
   });
+  cancelRequestsFor(conversationId, userId);
   const remaining = await prisma.conversationMember.findMany({
     where: { conversationId },
     orderBy: { joinedAt: 'asc' },
@@ -249,6 +313,66 @@ export async function leaveGroup(userId: string, conversationId: string): Promis
   notify([userId, ...remaining.map((m) => m.userId)], conversationId);
   return true;
 }
+
+/** The group's owner takes someone out of the group. Their earlier messages stay. */
+export async function removeMember(
+  userId: string,
+  conversationId: string,
+  targetId: string,
+): Promise<ConversationView> {
+  await requireGroup(userId, conversationId);
+  const me = await requireMember(userId, conversationId);
+  if (me.role !== 'OWNER') throw fail('FORBIDDEN', 'Only the group’s owner can remove people');
+  if (targetId === userId) throw fail('BAD_USER_INPUT', 'Leave the group instead');
+  const target = await prisma.conversationMember.findUnique({
+    where: { conversationId_userId: { conversationId, userId: targetId } },
+  });
+  if (!target) throw fail('NOT_FOUND', 'They’re not in this group');
+  await prisma.conversationMember.delete({
+    where: { conversationId_userId: { conversationId, userId: targetId } },
+  });
+  cancelRequestsFor(conversationId, targetId);
+  // They're told too, so the chat leaves their list on every device.
+  notify([targetId, ...(await memberIds(conversationId))], conversationId);
+  return requireView(userId, conversationId);
+}
+
+/** Removes a direct chat from your list. It comes back with the next message, or if you start it again. */
+export async function hideConversation(userId: string, conversationId: string): Promise<boolean> {
+  await requireMember(userId, conversationId);
+  const conversation = await prisma.conversation.findUniqueOrThrow({
+    where: { id: conversationId },
+  });
+  if (conversation.type !== 'DIRECT') throw fail('BAD_USER_INPUT', 'Leave the group instead');
+  const now = new Date();
+  await prisma.conversationMember.update({
+    where: { conversationId_userId: { conversationId, userId } },
+    data: { hiddenAt: now, lastReadAt: now },
+  });
+  notify([userId], conversationId); // your other tabs drop it too
+  return true;
+}
+
+export async function muteConversation(
+  userId: string,
+  conversationId: string,
+  muted: boolean,
+): Promise<ConversationView> {
+  await requireMember(userId, conversationId);
+  await prisma.conversationMember.update({
+    where: { conversationId_userId: { conversationId, userId } },
+    data: { mutedAt: muted ? new Date() : null },
+  });
+  notify([userId], conversationId);
+  return requireView(userId, conversationId);
+}
+
+/** The direct chat between two people, if there is one. */
+export async function directBetween(a: string, b: string) {
+  return prisma.conversation.findUnique({ where: { directKey: [a, b].sort().join(':') } });
+}
+
+export const notifyConversation = notify;
 
 export async function markRead(userId: string, conversationId: string): Promise<ConversationView> {
   await requireMember(userId, conversationId);

@@ -12,7 +12,10 @@ import { GraphQLWsLink } from '@apollo/client/link/subscriptions';
 import { getMainDefinition } from '@apollo/client/utilities';
 import { createClient } from 'graphql-ws';
 import { setConnectionState } from './connection';
+import { getPeerId } from '@/features/media/peerId';
+import { clearDrafts } from './drafts';
 import { ME } from './gql';
+import { runSignOutHooks } from './sessionHooks';
 
 interface PageRef {
   hasMore: boolean;
@@ -60,15 +63,51 @@ const cache = new InMemoryCache({
       },
     },
     MessagePage: { keyFields: false },
+    // A message's reactions always arrive whole (from a fetch, a reaction or a live event): replace them.
+    Message: { fields: { reactions: { merge: false } } },
   },
 });
 
 const wsProtocol = location.protocol === 'https:' ? 'wss' : 'ws';
 
+/** Longest pause between reconnect attempts. The library's default doubles without limit. */
+const MAX_RETRY_WAIT_MS = 8000;
+let wakeRetry: (() => void) | null = null;
+// Coming back online or returning to the tab retries at once instead of sitting out the timer.
+if (typeof window !== 'undefined') {
+  const wake = () => wakeRetry?.();
+  window.addEventListener('online', wake);
+  window.addEventListener('focus', wake);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') wake();
+  });
+}
+
+/** Exponential backoff (1s, 2s, 4s…) capped at a few seconds, with jitter, that can be woken early. */
+function retryWait(retries: number) {
+  return new Promise<void>((resolve) => {
+    const delay = Math.min(1000 * 2 ** retries, MAX_RETRY_WAIT_MS) + Math.random() * 700;
+    const done = () => {
+      clearTimeout(timer);
+      if (wakeRetry === done) wakeRetry = null;
+      resolve();
+    };
+    const timer = setTimeout(done, delay);
+    wakeRetry = done;
+  });
+}
+
 export const wsClient = createClient({
   url: `${wsProtocol}://${location.host}/graphql`,
   lazy: true, // connect only once someone subscribes, i.e. after signing in
+  // Identifies this tab for device-to-device photo and video transfers.
+  connectionParams: () => ({ peerId: getPeerId() }),
   retryAttempts: Infinity,
+  retryWait,
+  // While the server is unreachable the browser reports an *error* before the close, and the
+  // library's default only retries on closes, so it would give up for good. Always retry; the
+  // library still stops on genuinely fatal close codes (e.g. a rejected session).
+  shouldRetry: () => true,
   keepAlive: 20_000,
   on: {
     connecting: () => setConnectionState('connecting'),
@@ -98,9 +137,11 @@ let resetting = false;
 export async function resetSession() {
   if (resetting) return;
   resetting = true;
+  clearDrafts();
   try {
     client.writeQuery({ query: ME, data: { me: null } });
     await new Promise((resolve) => setTimeout(resolve, 0)); // let the signed-in screens unmount
+    await runSignOutHooks(); // e.g. photos and videos saved on this device
     await client.resetStore();
   } catch {
     /* the Me query will report the problem */

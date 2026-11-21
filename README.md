@@ -1,13 +1,16 @@
 <div align="center">
-  
-# Realtime
 
-**Minimal realtime chat. Direct messages and group chats, delivered instantly.**
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/brand/jessdek-logo/concepts/f-monogram/wordmark-dark.svg">
+  <img src="docs/brand/jessdek-logo/concepts/f-monogram/wordmark.svg" alt="jessDek" width="300">
+</picture>
 
-[![CI](https://github.com/shtmthw/realTime/actions/workflows/ci.yml/badge.svg)](https://github.com/shtmthw/realTime/actions/workflows/ci.yml)
-[![Docker Hub](https://img.shields.io/docker/v/matthew552/realtime?label=docker%20hub&sort=semver)](https://hub.docker.com/r/matthew552/realtime)
+**A small, fast chat app. Direct messages and group chats, delivered instantly.**
 
-<img src="docs/screenshots/desktop-chat-light.png" alt="Realtime on desktop" width="760">
+[![CI](https://github.com/shtmthw/jessDek/actions/workflows/ci.yml/badge.svg)](https://github.com/shtmthw/jessDek/actions/workflows/ci.yml)
+[![Docker Hub](https://img.shields.io/docker/pulls/matthew552/jessdek?label=docker%20hub)](https://hub.docker.com/r/matthew552/jessdek)
+
+<img src="docs/screenshots/desktop-chat-light.png" alt="jessDek on desktop" width="760">
 
 </div>
 
@@ -16,7 +19,7 @@
 All you need is Docker. Download the compose file, pull the image and start it:
 
 ```bash
-curl -O https://raw.githubusercontent.com/shtmthw/realTime/master/docker-compose.yml
+curl -O https://raw.githubusercontent.com/shtmthw/jessDek/master/docker-compose.yml
 docker compose pull
 docker compose up -d
 ```
@@ -26,21 +29,65 @@ Open **http://localhost:8080** and create an account. To try a conversation, ope
 The defaults are fine for a quick trial. For anything longer-lived, set your own secrets:
 
 ```bash
-curl -O https://raw.githubusercontent.com/shtmthw/realTime/master/.env.example
+curl -O https://raw.githubusercontent.com/shtmthw/jessDek/master/.env.example
 cp .env.example .env     # then set JWT_SECRET and POSTGRES_PASSWORD
 docker compose up -d
 ```
 
-To stop, run `docker compose down`. Your data is kept in the `realtime_db` volume; add `-v` to delete it.
+To stop, run `docker compose down`. Your data is kept in the `realtime_db` volume; add `-v` to delete it. (The volume keeps the name it had before the app was called jessDek, so existing installs carry their data over.)
 
 ## Features
 
 - **Instant delivery.** Messages, typing indicators, unread counts and online status arrive live over WebSockets, with no polling.
 - **Direct messages and group chats.** Find people by username with live search. Create groups, add members later, rename or leave them.
-- **Pleasant to use.** Messages appear immediately and retry if sending fails. Unread badges, a "new messages" pill, infinite scroll through history, day separators, a reconnecting banner, and `Ctrl/⌘ + K` to start a new chat.
+- **Photos and videos, device to device.** Sent straight between browsers over WebRTC and never stored on the server. They can be downloaded while someone who has them is online. Up to 10 per message, with a caption.
+- **Replies and reactions.** Reply to any message and it arrives with a quote of the original; tap the quote to jump back to it. React with one emoji per person: six quick ones, or any emoji from a searchable picker. On phones, long-press a message for reactions and swipe it right to reply; on desktop, hover it or right-click. Reactions are quiet: no sound, and they never count as unread.
+- **You decide who reaches you.** Block someone and they can't message you, start a chat with you or add you to groups, and neither of you sees the other's online status. Mute any chat, remove a direct chat from your list, and (as a group's owner) remove members.
+- **Pleasant to use.** Messages appear immediately and retry if sending fails. Unread badges, a "new messages" pill, infinite scroll through history, day separators, a reconnecting banner, and `Ctrl/⌘ + K` to start a new chat. New accounts get a one-time welcome that points them to their avatar and card.
 - **Mobile-first.** A single pane with back navigation on phones and two panes on desktop. Respects safe areas, uses 44 px tap targets, follows your system's light or dark theme, and can be installed as a PWA.
 - **Secure by default.** argon2id password hashing, httpOnly session cookies, rate limiting, input validation, and membership checks on every operation.
-- **One image.** The API and the web app ship together as `matthew552/realtime`. The only other container is PostgreSQL.
+- **One image.** The API and the web app ship together as `matthew552/jessdek`. The only other container is PostgreSQL.
+
+## Avatars
+
+Everyone has a cartoon character as their avatar, drawn head and shoulders on their own background colour. It starts as the same default character for everybody, and you dress it up in **Settings → Edit avatar**:
+
+- **Face:** 10 skin tones, 6 face shapes, 16 eyes in 7 colours, brows, noses, 14 mouths, blush and freckles, and cheek stickers.
+- **Hair:** 36 styles in 16 colours (long styles tuck behind the ears and fall over the shoulders), and hair clips.
+- **Wardrobe:** 26 hats and headwear, 21 tops, 13 neck accessories, glasses, 8 earrings, and 19 colours for hats, tops, neck items, clips and earrings.
+- **A little pet** on your shoulder: a cat, puppy, chick, bunny, frog, ghost, hamster or bear.
+
+**Specials** are nine ready-made characters in a finer, softer style: thin lines, doe eyes and tiny mouths, with beanies, headphones, bead necklaces, a checkered sweater and more. Pick one in the studio's Specials tab, then change anything in the other tabs as usual. The **Fine** line weight works on any look.
+
+The studio has undo (`Ctrl/⌘ + Z`) and a randomize button. Unsaved changes wait on your device until you come back. If you'd rather not have a character, you can show your initials instead.
+
+Avatars are drawn in the browser as SVG. The server stores only a small "recipe" naming the chosen items (at most 1 KiB of JSON), so there are no image uploads. A change shows up straight away for everyone who shares a chat with you.
+
+<div align="center">
+
+<img src="docs/screenshots/avatar-studio-light.png" alt="The avatar studio on a desktop: a live preview beside a grid of hats" width="620">
+<img src="docs/screenshots/avatar-studio-phone-dark.png" alt="The avatar studio on a phone, dark theme" width="190">
+<img src="docs/screenshots/avatar-specials-light.png" alt="The avatar studio's Specials tab: nine ready-made characters with fine lines" width="620">
+
+</div>
+
+## Cards
+
+Everyone has a **card**: a portrait card with their `@username`, their avatar, up to six interests and a short "about me", plus a **Message** button. Tap someone in a chat header, a group's member list, a group message or New chat search to see theirs. Design your own in **Settings → Your card**:
+
+- **Words:** an about of up to 150 characters, and interests picked from about 100 built-in ones, or your own with an emoji.
+- **Look:** solid and gradient backgrounds, patterns, borders and corners, finishes (gloss, holographic, glitter, paper), four layouts, seven fonts, dividers, interest and button styles, and a frame and ring for your avatar.
+- **Stickers:** up to eight, drawn in the avatar style or any emoji. Drag them anywhere, resize and turn them, or pinch on a phone.
+
+Every card is the same size, so long text shrinks to fit. Each card has a link, `/@username`. People on jessDek can always open it; turn on **Share my card** and anyone can, even without an account. Their Message button asks them to sign in or sign up, then opens the chat with you. Like avatars, cards are drawn in the browser from a small recipe (at most 4 KiB of JSON).
+
+<div align="center">
+
+<img src="docs/screenshots/card-studio-light.png" alt="The card studio on a desktop: a live card preview beside sticker options" width="620">
+<img src="docs/screenshots/card-studio-phone-dark.png" alt="The card studio on a phone, dark theme" width="190">
+<img src="docs/screenshots/card-public-light.png" alt="Bob's shared card, opened by someone who isn't signed in" width="620">
+
+</div>
 
 ## Screenshots
 
@@ -53,13 +100,11 @@ To stop, run `docker compose down`. Your data is kept in the `realtime_db` volum
 
 </div>
 
-
-
 | Light                                                    | Dark                                                         |
 | -------------------------------------------------------- | ------------------------------------------------------------ |
 | ![Group chat](docs/screenshots/desktop-group-light.png)  | ![Group chat, dark theme](docs/screenshots/desktop-group-dark.png) |
+| ![Photos and videos](docs/screenshots/desktop-media-light.png) | ![Photos and videos, dark theme](docs/screenshots/desktop-media-dark.png) |
 | ![Sign up](docs/screenshots/auth-light.png)              | ![Direct message, dark theme](docs/screenshots/desktop-chat-dark.png) |
-              
 
 ## Configuration
 
@@ -71,10 +116,15 @@ Set these in `.env` next to `docker-compose.yml`.
 | `JWT_SECRET`        | _(random)_ | Signs session cookies. If unset, a random secret is generated at startup, so everyone is signed out whenever the container restarts |
 | `POSTGRES_PASSWORD` | `realtime` | Database password                                                                                 |
 | `COOKIE_SECURE`     | `false`    | Set to `true` when serving over HTTPS so cookies are marked `Secure`                              |
+| `MEDIA_ENABLED`     | `true`     | Turns photos and videos on or off                                                                 |
+| `MEDIA_RELAY`       | `true`     | Lets the server pass media between two devices (in memory, nothing kept) when they can't connect directly |
+| `MEDIA_MAX_IMAGE_MB` | `20`      | Largest photo, after the browser has resized it                                                   |
+| `MEDIA_MAX_VIDEO_MB` | `100`     | Largest video                                                                                     |
+| `ICE_SERVERS`       | public STUN | JSON list of STUN/TURN servers for direct connections, e.g. `[{"urls":"turn:turn.example.com","username":"u","credential":"p"}]`. `[]` means same-network only |
 
 ### Behind a reverse proxy
 
-If you put Realtime behind Caddy, nginx or Traefik, the proxy must forward WebSocket upgrades on `/graphql` and preserve the `Host` header. Serve it over HTTPS and set `COOKIE_SECURE=true`.
+If you put jessDek behind Caddy, nginx or Traefik, the proxy must forward WebSocket upgrades on `/graphql` **and `/media-relay`**, and preserve the `Host` header. Serve it over HTTPS and set `COOKIE_SECURE=true`. HTTPS also makes the relay's frames end-to-end encrypted between the two browsers.
 
 ## Updating
 
@@ -84,6 +134,10 @@ docker compose up -d
 ```
 
 Your data lives in the `realtime_db` volume and is kept across updates.
+
+### Moving from `matthew552/realtime`
+
+jessDek used to be called Realtime, and its image was `matthew552/realtime`. That image no longer gets updates. To switch, download the new `docker-compose.yml` (it only changes the image name) and run the two commands above. Your accounts, chats and settings stay, because the database and its volume are unchanged.
 
 ## Upgrading from v1
 
@@ -99,11 +153,15 @@ flowchart LR
     S[Fastify + GraphQL Yoga + graphql-ws]
   end
   S --> P[(PostgreSQL)]
+  B <-. "photos and videos: WebRTC, or the in-memory relay" .-> B2[Another browser]
 ```
 
 - **One conversation model.** Direct messages and groups are both conversations with members. Each direct-message pair has a unique key, so two people can never end up with two separate chats.
 - **One event stream per user.** New messages, conversation changes, typing and presence all arrive on a single subscription. Events are published only to current members, so nobody can listen in on a chat they are not part of.
 - **Sessions** are a signed JWT in an `httpOnly`, `SameSite=Lax` cookie. The WebSocket handshake authenticates with the same cookie and rejects cross-origin connections.
+- **Photos and videos never touch the server's disk or database.** The database keeps a small metadata row per file (type, size, dimensions, a hash and a tiny blur placeholder), and a test guards against any column that could hold bytes. The files themselves stay in each person's browser storage.
+- **Direct first.** The two browsers connect over WebRTC data channels; the server only passes the short handshake messages. If that fails (a strict firewall, or someone chose "Hide my IP address"), the server pipes the bytes between the two sockets in memory instead. On HTTPS those frames are encrypted by the browsers, so the server sees only ciphertext.
+- **Pulled from whoever has it.** A device asks which online members of the chat have a file, and the first to answer sends it, so group media stays available after the sender goes offline. With nothing stored on the server, a photo can only be downloaded while someone who has it is online. The app says so ("Waiting for Alice to come online") and fills in by itself when they return. Photos are re-encoded before sending, which removes location data; videos are sent as they are.
 - **Presence** is tracked in memory by counting each user's open sockets. This works for a single instance; running several instances behind a load balancer is not supported.
 
 | Layer  | Stack                                                                                              |
@@ -119,16 +177,16 @@ flowchart LR
 Requirements: Node 22+ and a PostgreSQL database.
 
 ```bash
-git clone https://github.com/shtmthw/realTime.git
-cd realTime
+git clone https://github.com/shtmthw/jessDek.git
+cd jessDek
 npm install
 
 # a throwaway database
-docker run -d --name realtime-db -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=realtime -p 5432:5432 postgres:17-alpine
+docker run -d --name jessdek-db -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=jessdek -p 5432:5432 postgres:17-alpine
 
-cp .env.example .env     # set DATABASE_URL=postgresql://postgres:postgres@localhost:5432/realtime
+cp .env.example .env     # set DATABASE_URL=postgresql://postgres:postgres@localhost:5432/jessdek
 npm run db:migrate -w apps/server
-npm run db:seed -w apps/server    # optional demo users: alice, bob, carol, dave, erin (password: password123)
+npm run db:seed -w apps/server    # optional demo users: alice, bob, carol, dave, erin (password: SEED_PASSWORD, or a random one it prints)
 npm run dev
 ```
 
@@ -146,13 +204,14 @@ The web app runs on http://localhost:5173. Vite proxies `/graphql`, including We
 
 Tests use their own databases and never touch your development data: `DATABASE_URL_TEST` for the server tests and `DATABASE_URL_E2E` for Playwright. Both default to `localhost:55432` (see `apps/server/vitest.config.ts` and `e2e/server.ts`).
 
-To build the image locally instead of pulling it: `docker build -t realtime .`
+To build the image locally instead of pulling it: `docker build -t jessdek .`
 
 ```
 apps/server   Fastify + GraphQL API, Prisma schema and migrations, tests
 apps/web      React app
 e2e           Playwright tests and the screenshot generator
 Dockerfile    Builds the single runtime image
+docs/brand    The jessDek logo: final SVG and PNG exports, and the generator that draws them
 ```
 
 </details>

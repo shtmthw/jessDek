@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { newUser, send, startDirect, unique } from './helpers';
+import { createGroup, newUser, send, startDirect, unique } from './helpers';
 
 test('two people chat in realtime without reloading', async ({ browser }) => {
   const a = await newUser(browser, unique('alice'));
@@ -93,6 +93,8 @@ test('group chats reach everyone and show unread counts', async ({ browser }) =>
 });
 
 test('history survives a reload and pages in earlier messages', async ({ browser }) => {
+  // Forty sends one after another: on a busy machine that alone can come close to the default 30 s.
+  test.slow();
   const a = await newUser(browser, unique('alice'));
   const b = await newUser(browser, unique('bob'));
   await startDirect(a.page, b.username);
@@ -115,3 +117,47 @@ test('history survives a reload and pages in earlier messages', async ({ browser
   await a.context.close();
   await b.context.close();
 });
+
+for (const [label, viewport] of [
+  ['desktop', { width: 1100, height: 760 }],
+  ['phone', { width: 390, height: 844 }],
+] as const) {
+  test(`group chats show who is typing, with their picture (${label})`, async ({ browser }) => {
+    const a = await newUser(browser, unique('alice'), viewport);
+    const b = await newUser(browser, unique('bob'), viewport);
+    const c = await newUser(browser, unique('carol'), viewport);
+    await createGroup(a.page, 'Typing club', [b.username, c.username]);
+    for (const u of [b, c]) {
+      await u.page
+        .getByRole('navigation', { name: 'Conversations' })
+        .getByRole('link', { name: /Typing club/ })
+        .click();
+    }
+
+    // Alice types: Bob and Carol see her face (her initial, on her colour) beside the dots.
+    await a.page
+      .getByLabel('Message', { exact: true })
+      .pressSequentially('on my way', { delay: 30 });
+    for (const u of [b, c]) {
+      const bubble = u.page.locator('[data-typing-bubble]');
+      await expect(bubble).toBeVisible();
+      await expect(bubble.locator('[data-typing-face]')).toHaveCount(1);
+      // Their face: the default character (they haven't made their own), titled with their name.
+      await expect(bubble.locator('[data-typing-face] svg')).toHaveCount(1);
+      await expect(bubble.locator('[data-typing-face]')).toHaveAttribute('title', a.username);
+      await expect(bubble.locator('.typing-dot')).toHaveCount(3);
+    }
+
+    // Bob types as well: Carol now sees both of them, and it fits on a phone.
+    await b.page.getByLabel('Message', { exact: true }).pressSequentially('me too', { delay: 30 });
+    await expect(c.page.locator('[data-typing-bubble] [data-typing-face]')).toHaveCount(2);
+    const overflow = await c.page.evaluate(
+      () => document.documentElement.scrollWidth - window.innerWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(0);
+
+    await a.context.close();
+    await b.context.close();
+    await c.context.close();
+  });
+}

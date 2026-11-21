@@ -1,17 +1,32 @@
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../src/app.js';
 import { prisma } from '../src/db.js';
-import { signInLimiter } from '../src/services/users.js';
+import { avatarLimiter, signInLimiter } from '../src/services/users.js';
+import { clearRelays } from '../src/relay.js';
+import { clearBlockCache } from '../src/services/blocks.js';
+import { cardLimiter } from '../src/services/cards.js';
+import { resetMediaState } from '../src/services/media.js';
 import { sendLimiter, typingLimiter } from '../src/services/messages.js';
+import { reactLimiter } from '../src/services/reactions.js';
+import { clearPeers } from '../src/services/peers.js';
 
 export async function resetDb() {
+  await prisma.block.deleteMany();
+  await prisma.attachment.deleteMany();
   await prisma.message.deleteMany();
   await prisma.conversationMember.deleteMany();
   await prisma.conversation.deleteMany();
   await prisma.user.deleteMany();
+  clearBlockCache();
+  clearPeers();
+  resetMediaState();
+  clearRelays();
   signInLimiter.clear();
+  avatarLimiter.clear();
   sendLimiter.clear();
   typingLimiter.clear();
+  reactLimiter.clear();
+  cardLimiter.clear();
 }
 
 export interface GqlResult<T = Record<string, any>> {
@@ -52,7 +67,7 @@ export class Client {
 export async function signUp(client: Client, username: string, extra: Record<string, string> = {}) {
   const res = await client.gql(
     `mutation($input: SignUpInput!) { signUp(input: $input) { id username displayName } }`,
-    { input: { username, email: `${username}@test.dev`, password: 'password123', ...extra } },
+    { input: { username, email: `${username}@test.dev`, password: 'test-password-1', ...extra } },
   );
   if (res.errors) throw new Error(res.errors[0]!.message);
   return res.data!.signUp as { id: string; username: string; displayName: string };

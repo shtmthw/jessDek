@@ -35,6 +35,44 @@ const profileSchema = z.object({
   avatarColor: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Pick a valid color'),
 });
 
+const avatarColorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Pick a valid color');
+
+/** The server never draws avatars, so it only checks the recipe's shape (AVATAR_PLAN.md §2). */
+const recipeSchema = z
+  .record(
+    z.string().regex(/^[a-zA-Z]{1,16}$/),
+    z.union([z.string().regex(/^[a-z0-9-]{1,24}$/), z.number().int().min(0).max(999)]),
+  )
+  .refine((r) => Object.keys(r).length <= 32);
+
+const AVATAR_MAX = 1024;
+const BAD_AVATAR = 'That avatar can’t be saved';
+
+/** Parses and re-serializes a recipe, so only a flat, small object is ever stored. */
+function parseAvatar(raw: unknown): string | null {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw !== 'string' || raw.length > AVATAR_MAX * 2) {
+    throw fail('BAD_USER_INPUT', BAD_AVATAR, { field: 'avatar' });
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw fail('BAD_USER_INPUT', BAD_AVATAR, { field: 'avatar' });
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw fail('BAD_USER_INPUT', BAD_AVATAR, { field: 'avatar' });
+  }
+  const result = recipeSchema.safeParse(parsed);
+  if (!result.success) throw fail('BAD_USER_INPUT', BAD_AVATAR, { field: 'avatar' });
+  const stored = JSON.stringify(result.data);
+  if (stored.length > AVATAR_MAX) throw fail('BAD_USER_INPUT', BAD_AVATAR, { field: 'avatar' });
+  return stored;
+}
+
+// Every avatar save fans out an event to everyone you share a chat with: 30 a minute per user.
+export const avatarLimiter = new RateLimiter(30, 60 * 1000);
+
 export const AVATAR_COLORS = [
   '#6366f1',
   '#0ea5e9',
@@ -130,4 +168,28 @@ export async function searchUsers(viewerId: string, query: string): Promise<User
 export async function updateProfile(userId: string, input: unknown): Promise<User> {
   const data = parseInput(profileSchema, input);
   return prisma.user.update({ where: { id: userId }, data });
+}
+
+/** The one-time welcome has been seen. Only the first time counts. */
+export async function dismissWelcome(userId: string): Promise<User> {
+  await prisma.user.updateMany({
+    where: { id: userId, welcomedAt: null },
+    data: { welcomedAt: new Date() },
+  });
+  return prisma.user.findUniqueOrThrow({ where: { id: userId } });
+}
+
+export async function updateAvatar(userId: string, input: unknown): Promise<User> {
+  const src = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
+  const avatarColor = parseInput(avatarColorSchema, src.avatarColor, 'avatarColor');
+  // Left out: keep the current avatar (a colour-only change). Null: back to the default character.
+  const avatar = 'avatar' in src ? parseAvatar(src.avatar) : undefined;
+  if (!avatarLimiter.allow(userId)) {
+    throw fail('RATE_LIMITED', 'You’re changing your avatar very quickly. Try again in a minute.');
+  }
+  avatarLimiter.hit(userId);
+  return prisma.user.update({
+    where: { id: userId },
+    data: avatar === undefined ? { avatarColor } : { avatarColor, avatar },
+  });
 }

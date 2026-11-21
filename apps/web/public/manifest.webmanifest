@@ -1,6 +1,6 @@
 {
-  "name": "Realtime",
-  "short_name": "Realtime",
+  "name": "jessDek",
+  "short_name": "jessDek",
   "description": "Minimal realtime chat: direct messages and group chats.",
   "start_url": "/",
   "display": "standalone",
@@ -8,7 +8,8 @@
   "theme_color": "#4f46e5",
   "icons": [
     { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
     { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }
   ]
 }

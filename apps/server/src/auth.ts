@@ -1,6 +1,7 @@
 import { hash, verify } from '@node-rs/argon2';
 import { SignJWT, jwtVerify } from 'jose';
 import { config } from './config.js';
+import { prisma } from './db.js';
 
 export const SESSION_COOKIE = 'rt_session';
 export const SESSION_MAX_AGE_S = 60 * 60 * 24 * 7;
@@ -61,5 +62,14 @@ export function parseCookies(header: string | undefined): Record<string, string>
   return out;
 }
 
-export const sessionFromCookieHeader = (header: string | undefined) =>
-  readSession(parseCookies(header)[SESSION_COOKIE]);
+/**
+ * The signed-in user for a request, or null. A validly signed token whose user no longer exists
+ * (for example after the database was reset) counts as signed out, so clients fall back to the
+ * sign-in screen instead of half-working with a ghost session.
+ */
+export async function sessionFromCookieHeader(header: string | undefined): Promise<string | null> {
+  const userId = await readSession(parseCookies(header)[SESSION_COOKIE]);
+  if (!userId) return null;
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
+  return user ? userId : null;
+}

@@ -5,9 +5,10 @@ const DAY = 24 * 60 * 60 * 1000;
 export const daysAgo = (d: Date, now = new Date()) =>
   Math.round((startOfDay(now).getTime() - startOfDay(d).getTime()) / DAY);
 
-const clock = (d: Date) => d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+// `numeric` hours: "9:05 AM" rather than "09:05 AM" (24-hour locales still pad, as they expect).
+const clock = (d: Date) => d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 
-/** "14:05" for messages. */
+/** "9:05 AM" or "14:05" (by locale) for messages. */
 export const formatClock = (iso: string) => clock(new Date(iso));
 
 /** Compact label for the conversation list: time today, "Yesterday", weekday, then date. */
@@ -42,7 +43,7 @@ export function formatLastSeen(iso: string, now = new Date()): string {
   if (min < 1) return 'Last seen just now';
   if (min < 60) return `Last seen ${min} min ago`;
   const hours = Math.floor(min / 60);
-  if (hours < 24 && daysAgo(new Date(iso), now) === 0) return `Last seen ${hours} h ago`;
+  if (hours < 24 && daysAgo(new Date(iso), now) === 0) return `Last seen ${hours} hr ago`;
   const days = daysAgo(new Date(iso), now);
   if (days === 1) return `Last seen yesterday`;
   return `Last seen ${new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
