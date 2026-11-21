@@ -1,13 +1,13 @@
 <div align="center">
 
-# Realtime
+# jessDek
 
 **Minimal realtime chat. Direct messages and group chats, delivered instantly.**
 
 [![CI](https://github.com/shtmthw/realTime/actions/workflows/ci.yml/badge.svg)](https://github.com/shtmthw/realTime/actions/workflows/ci.yml)
 [![Docker Hub](https://img.shields.io/docker/v/matthew552/realtime?label=docker%20hub&sort=semver)](https://hub.docker.com/r/matthew552/realtime)
 
-<img src="docs/screenshots/desktop-chat-light.png" alt="Realtime on desktop" width="760">
+<img src="docs/screenshots/desktop-chat-light.png" alt="jessDek on desktop" width="760">
 
 </div>
 
@@ -76,7 +76,7 @@ Everyone has a **card**: a portrait card with their `@username`, their avatar, u
 - **Look:** solid and gradient backgrounds, patterns, borders and corners, finishes (gloss, holographic, glitter, paper), four layouts, seven fonts, dividers, interest and button styles, and a frame and ring for your avatar.
 - **Stickers:** up to eight, drawn in the avatar style or any emoji. Drag them anywhere, resize and turn them, or pinch on a phone.
 
-Every card is the same size, so long text shrinks to fit. Each card has a link, `/@username`. People on Realtime can always open it; turn on **Share my card** and anyone can, even without an account. Their Message button asks them to sign in or sign up, then opens the chat with you. Like avatars, cards are drawn in the browser from a small recipe (at most 4 KiB of JSON).
+Every card is the same size, so long text shrinks to fit. Each card has a link, `/@username`. People on jessDek can always open it; turn on **Share my card** and anyone can, even without an account. Their Message button asks them to sign in or sign up, then opens the chat with you. Like avatars, cards are drawn in the browser from a small recipe (at most 4 KiB of JSON).
 
 <div align="center">
 
@@ -122,7 +122,7 @@ Set these in `.env` next to `docker-compose.yml`.
 
 ### Behind a reverse proxy
 
-If you put Realtime behind Caddy, nginx or Traefik, the proxy must forward WebSocket upgrades on `/graphql` **and `/media-relay`**, and preserve the `Host` header. Serve it over HTTPS and set `COOKIE_SECURE=true`. HTTPS also makes the relay's frames end-to-end encrypted between the two browsers.
+If you put jessDek behind Caddy, nginx or Traefik, the proxy must forward WebSocket upgrades on `/graphql` **and `/media-relay`**, and preserve the `Host` header. Serve it over HTTPS and set `COOKIE_SECURE=true`. HTTPS also makes the relay's frames end-to-end encrypted between the two browsers.
 
 ## Updating
 

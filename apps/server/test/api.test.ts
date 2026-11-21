@@ -1134,12 +1134,12 @@ describe('cards', () => {
 
   it('adds escaped link-preview tags for a shared card', () => {
     const html = withCardMeta(
-      '<html><head><title>Realtime</title></head></html>',
+      '<html><head><title>jessDek</title></head></html>',
       'Bob <b>',
       'bob',
       JSON.stringify({ about: 'Hi "there"\nsecond line' }),
     );
-    expect(html).toContain('<title>Bob &#60;b&#62; (@bob) on Realtime</title>');
+    expect(html).toContain('<title>Bob &#60;b&#62; (@bob) on jessDek</title>');
     expect(html).toContain('<meta property="og:description" content="Hi &#34;there&#34;">');
   });
 

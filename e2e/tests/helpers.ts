@@ -15,7 +15,7 @@ export async function signUp(page: Page, username: string, password = 'test-pass
 
 /** A new account is greeted once; close it the way most people will. */
 export async function closeWelcome(page: Page) {
-  const welcome = page.getByRole('dialog', { name: 'Welcome to Realtime' });
+  const welcome = page.getByRole('dialog', { name: 'Welcome to jessDek' });
   await expect(welcome).toBeVisible();
   await welcome.getByRole('button', { name: 'Start chatting' }).click();
   await expect(welcome).toBeHidden();

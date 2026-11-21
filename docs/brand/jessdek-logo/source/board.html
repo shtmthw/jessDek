@@ -1,0 +1,19 @@
+<!doctype html><meta charset="utf-8"><title>jessDek board</title>
+<style>
+body{margin:0;font:14px/1.4 Figtree,system-ui,sans-serif;background:#f4f4f5;color:#18181b}
+.row{display:grid;grid-template-columns:200px 1fr 1fr 180px;gap:20px;align-items:center;padding:24px 32px;border-bottom:1px solid #e4e4e7}
+.tile{background:#fff;border-radius:16px;padding:28px;display:grid;place-items:center;min-height:170px}
+.tile.dark{background:#09090b}
+.tile img{max-width:100%}
+.small{display:flex;gap:14px;align-items:center}
+h2{margin:0;font-size:18px}
+</style>
+<body><div id=root></div>
+<script>
+const dir=new URLSearchParams(location.search).get("dir")||"out";
+const rows=(new URLSearchParams(location.search).get('rows')||'A:Ink,B:Deck,C:Bubble').split(',').map(r=>r.split(':'));
+root.innerHTML=rows.map(([k,n])=>`<div class=row><h2>${k} · ${n}</h2>
+<div class=tile><img src="${dir}/${k}.svg?${Date.now()}" style="width:440px"></div>
+<div class="tile dark"><img src="${dir}/${k}_dark.svg?${Date.now()}" style="width:440px" onerror="this.replaceWith('—')"></div>
+<div class=small><img src="${dir}/${k}_icon.svg?${Date.now()}" width=96><img src="${dir}/${k}_icon.svg?${Date.now()}" width=40><img src="${dir}/${k}_icon.svg?${Date.now()}" width=20></div></div>`).join('');
+</script>

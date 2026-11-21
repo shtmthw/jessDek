@@ -7,8 +7,10 @@ import type { Transition } from 'motion/react';
 export const spring = {
   /** Default for things arriving: bubbles, rows, popovers. */
   soft: { type: 'spring', visualDuration: 0.34, bounce: 0.22 },
-  /** Small, immediate feedback: toggles, thumbs, badges. */
+  /** Small, immediate feedback: thumbs, badges. */
   snappy: { type: 'spring', visualDuration: 0.24, bounce: 0.18 },
+  /** A switch knob gliding across: unhurried enough to follow, with a gentle settle. */
+  toggle: { type: 'spring', visualDuration: 0.32, bounce: 0.16 },
   /** A playful pop for counts and status dots. */
   pop: { type: 'spring', visualDuration: 0.3, bounce: 0.4 },
   /** Whole panes and sheets: weighty, almost no overshoot. */
@@ -21,6 +23,8 @@ export const spring = {
 export const exit = {
   fast: { duration: 0.12, ease: [0.4, 0, 1, 1] },
   base: { duration: 0.18, ease: [0.4, 0, 1, 1] },
+  /** Collapsing height eases in and out, so whatever sits below glides up instead of snapping. */
+  collapse: { duration: 0.26, ease: [0.4, 0, 0.2, 1] },
 } satisfies Record<string, Transition>;
 
 export const easeOut = [0.22, 1, 0.36, 1] as const;

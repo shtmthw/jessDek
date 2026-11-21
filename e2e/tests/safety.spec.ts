@@ -90,7 +90,7 @@ test('a muted chat is silent: grey badge, not in the tab title', async ({ browse
 
   await send(b.page, 'are you there?');
   await expect(row(a.page, /bob/i).getByLabel('1 unread')).toBeVisible();
-  await expect(a.page).toHaveTitle('Realtime');
+  await expect(a.page).toHaveTitle('jessDek');
 
   await row(a.page, /bob/i).click();
   await chatMenu(a.page, /Unmute notifications/);

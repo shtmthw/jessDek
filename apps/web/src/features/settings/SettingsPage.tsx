@@ -11,8 +11,8 @@ import {
   Share,
   Sun,
 } from 'lucide-react';
-import { AnimatePresence, motion } from 'motion/react';
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { AnimatePresence, motion, type Variants } from 'motion/react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { Link, useNavigate } from 'react-router';
 import { toast } from 'sonner';
@@ -29,7 +29,7 @@ import { cn } from '@/lib/cn';
 import { resetSession } from '@/lib/apollo';
 import { BLOCKED_USERS, SIGN_OUT, UPDATE_PROFILE } from '@/lib/gql';
 import { prefersReducedMotion } from '@/lib/media';
-import { exit, spring } from '@/lib/motion';
+import { easeOut, exit, spring } from '@/lib/motion';
 import { playSound, useSoundsEnabled, type SoundKind } from '@/lib/sounds';
 import { useThemePreference, type ThemePreference } from '@/lib/theme';
 import { CardView } from '../card/CardView';
@@ -512,19 +512,57 @@ function BlockedPeople() {
   );
 }
 
+/** The card link row opens its space first, then the row itself settles into it. */
+const linkReveal: Variants = {
+  closed: { height: 0, transition: exit.collapse },
+  open: { height: 'auto', transition: spring.panel },
+};
+const linkRow: Variants = {
+  closed: { opacity: 0, y: -6, scale: 0.98, transition: exit.fast },
+  open: {
+    opacity: 1,
+    y: 0,
+    scale: 1,
+    transition: { ...spring.soft, opacity: { duration: 0.22, delay: 0.05, ease: easeOut } },
+  },
+};
+
 /** A small look at your card, a way to edit and share it, and whether the link is public. */
 function YourCard() {
   const viewer = useViewer();
   const mine = useMyCard();
   const card = parseCard(mine.data?.recipe ?? null);
-  const shared = mine.data?.shared ?? false;
+  // The switch answers the tap at once; the server catches up behind it. Saves go one at a time and
+  // always end on the latest tap, so a slow reply can never land after a newer one and flip it back.
+  const [pending, setPending] = useState<boolean | null>(null);
+  const wanted = useRef<boolean | null>(null);
+  const saving = useRef(false);
+  const shared = pending ?? mine.data?.shared ?? false;
 
-  async function setShared(next: boolean) {
+  function setShared(next: boolean) {
+    wanted.current = next;
+    setPending(next);
+    if (!saving.current) void saveLatest();
+  }
+
+  async function saveLatest() {
+    saving.current = true;
+    let sent: boolean | null = null;
     try {
-      await mine.save({ shared: next });
-      toast.success(next ? 'Your card link is on' : 'Your card link is off');
+      while (wanted.current !== null && wanted.current !== sent) {
+        const value: boolean = wanted.current;
+        await mine.save({ shared: value });
+        sent = value;
+      }
+      toast.success(sent ? 'Your card link is on' : 'Your card link is off');
     } catch {
       toast.error('Couldn’t change that. Try again.');
+    } finally {
+      saving.current = false;
+      wanted.current = null;
+      // The last save is already in the cache, so handing back to it doesn't flicker. After a
+      // failure, this slides the switch back to what's really saved.
+      setPending(null);
     }
   }
 
@@ -554,42 +592,54 @@ function YourCard() {
           </Button>
         </div>
       </div>
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <span id="card-shared-label" className="text-sm font-medium">
-            Share my card
-          </span>
-          <p id="card-shared-hint" className="mt-0.5 text-xs text-muted-foreground">
-            Anyone with the link can see your card, even without an account. People on Realtime can
-            always see it.
-          </p>
-        </div>
-        <Switch
-          checked={shared}
-          onChange={(next) => void setShared(next)}
-          aria-labelledby="card-shared-label"
-          aria-describedby="card-shared-hint"
-        />
-      </div>
-      <AnimatePresence initial={false}>
-        {shared ? (
-          <motion.div
-            key="link"
-            className="flex items-center gap-2 overflow-hidden rounded-xl border border-border py-1.5 pl-3.5 pr-1.5"
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0, transition: exit.fast }}
-            transition={spring.soft}
-          >
-            <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
-              {cardUrl(viewer.username)}
+      {/* One child of the section, so its spacing can't jump when the link row comes and goes:
+          the gap above the row lives inside the height that animates. */}
+      <div>
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <span id="card-shared-label" className="text-sm font-medium">
+              Share my card
             </span>
-            <Button variant="ghost" size="sm" onClick={() => void copyCardLink(viewer.username)}>
-              <Copy className="size-4" /> Copy
-            </Button>
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
+            <p id="card-shared-hint" className="mt-0.5 text-xs text-muted-foreground">
+              Anyone with the link can see your card, even without an account. People on jessDek can
+              always see it.
+            </p>
+          </div>
+          <Switch
+            checked={shared}
+            onChange={setShared}
+            aria-labelledby="card-shared-label"
+            aria-describedby="card-shared-hint"
+          />
+        </div>
+        <AnimatePresence initial={false}>
+          {shared ? (
+            <motion.div
+              key="link"
+              className="overflow-hidden"
+              variants={linkReveal}
+              initial="closed"
+              animate="open"
+              exit="closed"
+            >
+              <motion.div variants={linkRow} className="origin-top pt-4">
+                <div className="flex items-center gap-2 rounded-xl border border-border py-1.5 pl-3.5 pr-1.5">
+                  <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
+                    {cardUrl(viewer.username)}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => void copyCardLink(viewer.username)}
+                  >
+                    <Copy className="size-4" /> Copy
+                  </Button>
+                </div>
+              </motion.div>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
+      </div>
     </Section>
   );
 }

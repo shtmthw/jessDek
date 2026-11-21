@@ -23,7 +23,7 @@ const count = (slot: Parameters<typeof slotIds>[0]) =>
   slotIds(slot).filter((id) => id !== 'none').length;
 
 /**
- * The one-time welcome for a new account: what Realtime is for, with the person's own character
+ * The one-time welcome for a new account: what jessDek is for, with the person's own character
  * trying on a few looks. Closing it any way counts as seen (on every device).
  */
 export function WelcomeDialog() {
@@ -81,7 +81,7 @@ export function WelcomeDialog() {
       onOpenChange={(next) => {
         if (!next) close();
       }}
-      title="Welcome to Realtime"
+      title="Welcome to jessDek"
       description={`Hi ${first}! Here’s what you can do.`}
     >
       <div className="flex flex-col gap-5">

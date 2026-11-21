@@ -772,6 +772,9 @@ export function MessageList({
 
   function renderRun(run: Run) {
     const others = !run.mine && isGroup;
+    // The avatar sits by the run's last bubble. A reaction pill hangs 18px below that bubble
+    // (26px tall, tucked 8px under it), so lift the avatar by as much to stay level with the bubble.
+    const pillBelow = (run.messages[run.messages.length - 1]?.reactions?.length ?? 0) > 0;
     return (
       <div
         key={run.key}
@@ -790,7 +793,10 @@ export function MessageList({
             }
             aria-label={`${run.sender.displayName}'s card`}
             title={`${run.sender.displayName}'s card`}
-            className="mb-px shrink-0 rounded-full transition-transform motion-safe:active:scale-90"
+            className={cn(
+              'shrink-0 rounded-full transition-[margin,scale] duration-200 ease-out-quint motion-safe:active:scale-90',
+              pillBelow ? 'mb-[18px]' : 'mb-px',
+            )}
           >
             <Avatar
               name={run.sender.displayName}

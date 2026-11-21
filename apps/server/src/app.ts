@@ -235,8 +235,8 @@ export function withCardMeta(
   } catch {
     /* no about */
   }
-  const title = escapeHtml(`${displayName} (@${username}) on Realtime`);
-  const description = escapeHtml(about || `Say hi to ${displayName} on Realtime.`);
+  const title = escapeHtml(`${displayName} (@${username}) on jessDek`);
+  const description = escapeHtml(about || `Say hi to ${displayName} on jessDek.`);
   const tags = [
     `<meta property="og:title" content="${title}">`,
     `<meta property="og:description" content="${description}">`,

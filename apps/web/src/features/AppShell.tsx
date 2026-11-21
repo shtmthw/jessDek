@@ -35,6 +35,7 @@ import { Avatar } from '@/components/Avatar';
 import { Button } from '@/components/Button';
 import { Kbd } from '@/components/Kbd';
 import { Logo } from '@/components/Logo';
+import { Wordmark } from '@/components/Wordmark';
 import { cn } from '@/lib/cn';
 import { hasTray } from '@/features/media/trayStore';
 import { CONVERSATIONS } from '@/lib/gql';
@@ -350,9 +351,9 @@ export function AppShell() {
   // Muted chats keep their own badge but don't count towards the tab title.
   const unread = conversations?.reduce((sum, c) => sum + (c.muted ? 0 : c.unreadCount), 0) ?? 0;
   useEffect(() => {
-    document.title = unread > 0 ? `(${unread}) Realtime` : 'Realtime';
+    document.title = unread > 0 ? `(${unread}) jessDek` : 'jessDek';
     return () => {
-      document.title = 'Realtime';
+      document.title = 'jessDek';
     };
   }, [unread]);
 
@@ -364,7 +365,10 @@ export function AppShell() {
         className="relative flex w-full shrink-0 flex-col border-border bg-surface md:w-80 md:border-r lg:w-96"
       >
         <header className="flex h-[calc(4rem+env(safe-area-inset-top))] shrink-0 items-center justify-between px-4 pt-[env(safe-area-inset-top)]">
-          <h1 className="text-2xl font-bold tracking-tight">Chats</h1>
+          <h1 className="flex items-center">
+            <Wordmark height={34} />
+            <span className="sr-only">Chats</span>
+          </h1>
           <Button
             variant="ghost"
             size="icon"

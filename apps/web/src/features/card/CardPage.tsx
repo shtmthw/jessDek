@@ -3,7 +3,7 @@ import { motion } from 'motion/react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 import { Button, buttonClass } from '@/components/Button';
-import { Logo } from '@/components/Logo';
+import { Wordmark } from '@/components/Wordmark';
 import { Skeleton } from '@/components/Skeleton';
 import { spring } from '@/lib/motion';
 import { DealtCard } from './CardDialog';
@@ -67,8 +67,8 @@ export function CardPage({
             </p>
             <p className="text-sm text-muted-foreground">
               {signedIn
-                ? `Nobody called @${username} is on Realtime, or their card isn’t available to you.`
-                : `If you know @${username}, sign in to find them on Realtime.`}
+                ? `Nobody called @${username} is on jessDek, or their card isn’t available to you.`
+                : `If you know @${username}, sign in to find them on jessDek.`}
             </p>
           </div>
         ) : (
@@ -118,10 +118,7 @@ export function CardPage({
       <Shell
         bar={
           <>
-            <span className="flex items-center gap-2.5">
-              <Logo size={30} />
-              <span className="text-[17px] font-semibold tracking-tight">Realtime</span>
-            </span>
+            <Wordmark height={36} />
             <Button variant="secondary" size="sm" onClick={onSignIn}>
               Sign in
             </Button>
@@ -130,7 +127,7 @@ export function CardPage({
       >
         {body}
         <p className="px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] text-center text-sm text-muted-foreground">
-          Realtime is a small, fast chat app.{' '}
+          jessDek is a small, fast chat app.{' '}
           <button
             type="button"
             onClick={onSignUp ?? onSignIn}

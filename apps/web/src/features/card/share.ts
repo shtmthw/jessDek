@@ -20,7 +20,7 @@ export async function shareCard(user: { username: string; displayName: string })
   const url = cardUrl(user.username);
   if (typeof navigator.share === 'function' && isTouchDevice()) {
     try {
-      await navigator.share({ title: `${user.displayName} on Realtime`, url });
+      await navigator.share({ title: `${user.displayName} on jessDek`, url });
       return;
     } catch (err) {
       if ((err as DOMException)?.name === 'AbortError') return;

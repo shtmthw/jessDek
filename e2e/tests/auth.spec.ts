@@ -46,7 +46,7 @@ test('greets a new account once, and never again', async ({ page }) => {
   await signUp(page, name);
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Chats' })).toBeVisible();
-  await expect(page.getByRole('dialog', { name: 'Welcome to Realtime' })).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Welcome to jessDek' })).toHaveCount(0);
 
   // Not on the next sign-in either.
   await page.getByRole('link', { name: /@/ }).click();
@@ -55,5 +55,5 @@ test('greets a new account once, and never again', async ({ page }) => {
   await page.getByLabel('Password', { exact: true }).fill('test-password-1');
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Chats' })).toBeVisible();
-  await expect(page.getByRole('dialog', { name: 'Welcome to Realtime' })).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Welcome to jessDek' })).toHaveCount(0);
 });

@@ -1,0 +1,114 @@
+/**
+ * The jessDek wordmark: the jD monogram followed by the hand-drawn name.
+ * Source of truth: docs/brand/jessdek-logo/concepts/f-monogram/wordmark.svg
+ * (and wordmark-dark.svg). One drawing serves both themes: the ink follows
+ * `currentColor` and the sparkle follows `--brand-text`, which is exactly how
+ * the light and dark exports differ. The viewBox is trimmed to the ink, so the
+ * mark lines up with the page gutter.
+ */
+export function Wordmark({ height = 32, className = '' }: { height?: number; className?: string }) {
+  return (
+    <svg
+      role="img"
+      aria-label="jessDek"
+      viewBox="26 3 452 163"
+      height={height}
+      width={(height * 452) / 163}
+      className={`text-foreground ${className}`}
+    >
+      <path
+        d="M49.4 40.49 L69.91 40.66 C98.02 41.35 114.95 57.45 114.47 84.57 C115.47 109.52 98.31 126.49 70.19 126.9 L50.37 126.69 Z"
+        fill="#4F46E5"
+        stroke="currentColor"
+        strokeWidth={6.51}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M50.46 40.49 L50.53 142.75 C49.71 157.41 41.68 162.8 31.42 159.73"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={6.51}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M52.59 5.33 C53.01 15.51 53.01 15.51 62.43 19.39 C52.25 19.81 52.25 19.81 48.37 29.23 C47.95 19.05 47.95 19.05 38.53 15.17 C48.71 14.75 48.71 14.75 52.59 5.33 Z"
+        fill="var(--brand-text)"
+      />
+      <path
+        d="M176.76 63.27 L178.34 117.67 C178.54 128.78 172.85 133.46 163.92 131.21"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={5.704}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <ellipse cx={177.16} cy={49.88} rx={4} ry={4} fill="currentColor" />
+      <path
+        d="M191.29 85.28 L226.21 85.37 C226.95 70.96 218.79 61.8 208.34 61.08 C196.54 61.76 189.45 71.83 188.98 84.75 C188.63 99.13 197.85 107.88 208.27 108.8 C215.49 108.21 220.4 106.85 224.51 101.44"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={5.704}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M269.6 69.26 C266.04 64.86 261.95 63.04 256.56 63.15 C248.51 62.53 244.51 67.53 244.49 73.73 C244.84 80.82 249.28 83.02 258.05 85.79 C266.65 87.01 272.01 89.85 271.56 98.77 C272.11 105.26 267.07 109.28 258.3 109.7 C250.64 108.85 245.48 106.43 242.34 101.44"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={5.704}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M313.65 69.27 C310.94 63.79 307.12 62.04 300.56 61.08 C293.68 61.55 287.84 66.53 288.74 71.62 C287.46 79.21 293.58 82.3 301.19 83.96 C310.71 86.44 315.73 89.56 314.83 98.12 C314.25 104.62 308.78 108.94 300.13 108.66 C292.68 108.57 287.97 105.09 285.59 99.82"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={5.704}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M328.51 42.93 L330.16 109.16 L344.98 109.39 C366.85 108.64 379.02 96.2 379.31 75.73 C378.16 54.81 365.87 42.64 343.09 42.19 Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={5.704}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M392.23 85.67 L426.92 85.12 C428.3 69.72 419.72 61.41 410.49 61.06 C397.99 60.74 391.58 70.64 390.26 85.08 C390.2 98.83 398.44 107.64 410.31 108.56 C417.13 108.68 421.86 105.94 425.58 101.31"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={5.704}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M441.36 37.83 L443.04 109.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={5.704}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M469.03 63.99 L443.37 89.24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={5.704}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M453.02 80.21 L472.74 109.42"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={5.704}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
