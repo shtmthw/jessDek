@@ -1,11 +1,14 @@
 <div align="center">
 
-# jessDek
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/brand/jessdek-logo/concepts/f-monogram/wordmark-dark.svg">
+  <img src="docs/brand/jessdek-logo/concepts/f-monogram/wordmark.svg" alt="jessDek" width="300">
+</picture>
 
-**Minimal realtime chat. Direct messages and group chats, delivered instantly.**
+**A small, fast chat app. Direct messages and group chats, delivered instantly.**
 
-[![CI](https://github.com/shtmthw/realTime/actions/workflows/ci.yml/badge.svg)](https://github.com/shtmthw/realTime/actions/workflows/ci.yml)
-[![Docker Hub](https://img.shields.io/docker/v/matthew552/realtime?label=docker%20hub&sort=semver)](https://hub.docker.com/r/matthew552/realtime)
+[![CI](https://github.com/shtmthw/jessDek/actions/workflows/ci.yml/badge.svg)](https://github.com/shtmthw/jessDek/actions/workflows/ci.yml)
+[![Docker Hub](https://img.shields.io/docker/pulls/matthew552/jessdek?label=docker%20hub)](https://hub.docker.com/r/matthew552/jessdek)
 
 <img src="docs/screenshots/desktop-chat-light.png" alt="jessDek on desktop" width="760">
 
@@ -16,7 +19,7 @@
 All you need is Docker. Download the compose file, pull the image and start it:
 
 ```bash
-curl -O https://raw.githubusercontent.com/shtmthw/realTime/master/docker-compose.yml
+curl -O https://raw.githubusercontent.com/shtmthw/jessDek/master/docker-compose.yml
 docker compose pull
 docker compose up -d
 ```
@@ -26,12 +29,12 @@ Open **http://localhost:8080** and create an account. To try a conversation, ope
 The defaults are fine for a quick trial. For anything longer-lived, set your own secrets:
 
 ```bash
-curl -O https://raw.githubusercontent.com/shtmthw/realTime/master/.env.example
+curl -O https://raw.githubusercontent.com/shtmthw/jessDek/master/.env.example
 cp .env.example .env     # then set JWT_SECRET and POSTGRES_PASSWORD
 docker compose up -d
 ```
 
-To stop, run `docker compose down`. Your data is kept in the `realtime_db` volume; add `-v` to delete it.
+To stop, run `docker compose down`. Your data is kept in the `realtime_db` volume; add `-v` to delete it. (The volume keeps the name it had before the app was called jessDek, so existing installs carry their data over.)
 
 ## Features
 
@@ -43,7 +46,7 @@ To stop, run `docker compose down`. Your data is kept in the `realtime_db` volum
 - **Pleasant to use.** Messages appear immediately and retry if sending fails. Unread badges, a "new messages" pill, infinite scroll through history, day separators, a reconnecting banner, and `Ctrl/⌘ + K` to start a new chat. New accounts get a one-time welcome that points them to their avatar and card.
 - **Mobile-first.** A single pane with back navigation on phones and two panes on desktop. Respects safe areas, uses 44 px tap targets, follows your system's light or dark theme, and can be installed as a PWA.
 - **Secure by default.** argon2id password hashing, httpOnly session cookies, rate limiting, input validation, and membership checks on every operation.
-- **One image.** The API and the web app ship together as `matthew552/realtime`. The only other container is PostgreSQL.
+- **One image.** The API and the web app ship together as `matthew552/jessdek`. The only other container is PostgreSQL.
 
 ## Avatars
 
@@ -133,6 +136,10 @@ docker compose up -d
 
 Your data lives in the `realtime_db` volume and is kept across updates.
 
+### Moving from `matthew552/realtime`
+
+jessDek used to be called Realtime, and its image was `matthew552/realtime`. That image no longer gets updates. To switch, download the new `docker-compose.yml` (it only changes the image name) and run the two commands above. Your accounts, chats and settings stay, because the database and its volume are unchanged.
+
 ## Upgrading from v1
 
 v2 is a full rewrite (TypeScript, PostgreSQL, GraphQL subscriptions). The data model changed, so v1 MySQL data is **not** migrated. See [REFRACTOR.md](REFRACTOR.md) for the plan and the reasoning behind it.
@@ -171,14 +178,14 @@ flowchart LR
 Requirements: Node 22+ and a PostgreSQL database.
 
 ```bash
-git clone https://github.com/shtmthw/realTime.git
-cd realTime
+git clone https://github.com/shtmthw/jessDek.git
+cd jessDek
 npm install
 
 # a throwaway database
-docker run -d --name realtime-db -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=realtime -p 5432:5432 postgres:17-alpine
+docker run -d --name jessdek-db -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=jessdek -p 5432:5432 postgres:17-alpine
 
-cp .env.example .env     # set DATABASE_URL=postgresql://postgres:postgres@localhost:5432/realtime
+cp .env.example .env     # set DATABASE_URL=postgresql://postgres:postgres@localhost:5432/jessdek
 npm run db:migrate -w apps/server
 npm run db:seed -w apps/server    # optional demo users: alice, bob, carol, dave, erin (password: SEED_PASSWORD, or a random one it prints)
 npm run dev
@@ -198,13 +205,14 @@ The web app runs on http://localhost:5173. Vite proxies `/graphql`, including We
 
 Tests use their own databases and never touch your development data: `DATABASE_URL_TEST` for the server tests and `DATABASE_URL_E2E` for Playwright. Both default to `localhost:55432` (see `apps/server/vitest.config.ts` and `e2e/server.ts`).
 
-To build the image locally instead of pulling it: `docker build -t realtime .`
+To build the image locally instead of pulling it: `docker build -t jessdek .`
 
 ```
 apps/server   Fastify + GraphQL API, Prisma schema and migrations, tests
 apps/web      React app
 e2e           Playwright tests and the screenshot generator
 Dockerfile    Builds the single runtime image
+docs/brand    The jessDek logo: final SVG and PNG exports, and the generator that draws them
 ```
 
 </details>

@@ -1,6 +1,8 @@
 # Pull and run:   docker compose up -d      → http://localhost:8080
 # Works with zero configuration. For anything beyond a trial, copy .env.example to .env
 # and set JWT_SECRET and POSTGRES_PASSWORD.
+# The database user, name and volume keep their original "realtime" names on purpose:
+# renaming them would cut existing installs off from their data.
 services:
   db:
     image: postgres:17-alpine
@@ -18,7 +20,7 @@ services:
       retries: 20
 
   app:
-    image: matthew552/realtime:latest
+    image: matthew552/jessdek:latest
     build: .
     restart: unless-stopped
     depends_on:

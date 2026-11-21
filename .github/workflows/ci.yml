@@ -55,7 +55,7 @@ jobs:
     needs: check
     runs-on: ubuntu-latest
     env:
-      IMAGE: matthew552/realtime
+      IMAGE: matthew552/jessdek
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-qemu-action@v3
