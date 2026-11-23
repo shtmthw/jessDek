@@ -28,3 +28,14 @@ export const exit = {
 } satisfies Record<string, Transition>;
 
 export const easeOut = [0.22, 1, 0.36, 1] as const;
+
+/**
+ * A transform as one string (always the same functions, so any two interpolate). Motion hands an
+ * animation of `transform` (or `opacity`) to the browser, which runs it on the compositor, so a busy
+ * main thread can't stall it; separate `x`/`y`/`scale` values are stepped in JS every frame. Use it
+ * for things that open while the page is doing work (dialogs, menus). Not on elements that also use
+ * `whileHover`/`whileTap` or drag with separate values: a `transform` string overrides those. End
+ * on `tf()`, never `'none'`: motion turns `none` into the other keyframe with its numbers zeroed.
+ */
+export const tf = ({ x = 0, y = 0, scale = 1 }: { x?: number; y?: number; scale?: number } = {}) =>
+  `translate(${x}px, ${y}px) scale(${scale})`;

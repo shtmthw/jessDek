@@ -39,10 +39,11 @@ To stop, run `docker compose down`. Your data is kept in the `realtime_db` volum
 ## Features
 
 - **Instant delivery.** Messages, typing indicators, unread counts and online status arrive live over WebSockets, with no polling.
-- **Direct messages and group chats.** Find people by username with live search. Create groups, add members later, rename or leave them.
+- **Direct messages and group chats.** Find people by username with live search. A new chat starts as a [message request](#message-requests-and-group-invites) the other person accepts, and groups invite people instead of adding them. Rename or leave groups at any time.
 - **Photos and videos, device to device.** Sent straight between browsers over WebRTC and never stored on the server. They can be downloaded while someone who has them is online. Up to 10 per message, with a caption.
 - **Replies and reactions.** Reply to any message and it arrives with a quote of the original; tap the quote to jump back to it. React with one emoji per person: six quick ones, or any emoji from a searchable picker. On phones, long-press a message for reactions and swipe it right to reply; on desktop, hover it or right-click. Reactions are quiet: no sound, and they never count as unread.
-- **You decide who reaches you.** Block someone and they can't message you, start a chat with you or add you to groups, and neither of you sees the other's online status. Mute any chat, remove a direct chat from your list, and (as a group's owner) remove members.
+- **Discover people.** A deck of cards from people who share at least one of your interests. Swipe through it, open someone's card and say hi with a suggested opener. See [Discover](#discover-the-card-deck).
+- **You decide who reaches you.** Someone new can send you one text message, which you accept or decline, and a group can only invite you. Block someone and they can't message you, start a chat with you or add you to groups, and neither of you sees the other's online status. Mute any chat, remove a direct chat from your list, and (as a group's owner) remove members.
 - **Pleasant to use.** Messages appear immediately and retry if sending fails. Unread badges, a "new messages" pill, infinite scroll through history, day separators, a reconnecting banner, and `Ctrl/⌘ + K` to start a new chat. New accounts get a one-time welcome that points them to their avatar and card.
 - **Mobile-first.** A single pane with back navigation on phones and two panes on desktop. Respects safe areas, uses 44 px tap targets, follows your system's light or dark theme, and can be installed as a PWA.
 - **Secure by default.** argon2id password hashing, httpOnly session cookies, rate limiting, input validation, and membership checks on every operation.
@@ -107,6 +108,28 @@ Like avatars and cards, a theme is a small recipe (at most 512 bytes of JSON) st
 <img src="docs/screenshots/group-theme-dark.png" alt="A group chat with the Matcha theme and member colours, dark theme" width="620">
 
 </div>
+
+## Message requests and group invites
+
+Nobody lands in your chats uninvited. A chat with someone new starts as a **request**, and a group only gets people who say yes.
+
+- **A new direct chat is a request.** Whoever starts it can send **one message, text only**: no photos, videos, replies or reactions. Then their composer is replaced by "Request sent · Erin can accept or decline". Chats you already had are unchanged, and once it is accepted a chat is an ordinary one.
+- **You see it under Requests.** A **Requests** row above your chats counts what is waiting (message requests and group invites together) and opens a list. Opening a request shows the message with **Accept**, **Decline** and **Block** where the composer would be. Looking at it tells the sender nothing.
+- **The sender finds out.** Accepting turns the request into an ordinary chat for both people, and the sender gets a toast ("Erin accepted your message request") while their composer switches over live. After a decline their chat says so and they can't send another. **A decline is final**: it only opens up again if the person who declined starts a chat themselves. Blocking from a request declines it, and the sender sees the same thing as for any decline.
+- **Groups invite instead of adding.** Creating a group, or inviting people later, sends invites. An invite shows the group's name, who invited you and who is in it, but none of its messages, with **Join group** and **Decline**. The inviter gets a toast with the answer, and **Group info** lists who is still invited and who declined. The person who sent an invite, or the group's owner, can take it back while it is pending. A declined invite is final for that group.
+- **Quiet and private.** Requests and invites make no sound and don't count in the tab title. Until a request is accepted, the two people see nothing of each other: no online status, typing or profile changes. Someone can reach out to at most 20 new people an hour, counting requests and invites together.
+
+## Discover: the card deck
+
+The **compass** next to New chat opens **Discover**: a deck of cards from everyone who shares **at least one interest** with you (built-in interests by id, your own words without regard to case). People you blocked, or who blocked you, never appear.
+
+- **The deck's front page** shows a stack. The card on top is where the deck starts, picked at random each time a deck is dealt. Tap it, or **Open the deck**.
+- **The deck** is a fan of five cards, the middle one largest. Swipe or drag it, use **← →**, the arrow buttons, or tap a side card to bring it to the middle. It's a circle in a fixed order, so going round brings you back. Decks of fewer than five cards don't loop: they stop at the ends. **Shuffle** deals again from someone else.
+- **Tap the middle card** to open it, with a box to say hi. Above the box are **suggested openers** written from the interests you share. Pick one (it fills the box, and you can change it) and send it. It goes out as an ordinary [message request](#message-requests-and-group-invites). If you already have a chat or a request with that person, the box says so instead.
+- **Back to deck** returns to the same card without loading anything again.
+- **Full quality or Light.** Every card is drawn in full by default: stickers, patterns, finishes and shadows. **Light** draws simpler cards (the same colours, avatar and text) with snappier motion, which is much easier on older phones and laptops. Switch it with the feather button in the deck's header or in **Settings → Discover**. It's kept per device, and a card you open is always shown in full. See [DECK_QUALITY_PLAN.md](DECK_QUALITY_PLAN.md).
+
+Cards load lazily from both ends of the deck: five each side to start, then five more whenever a side runs low, with at most ten kept each side. Decks of up to 21 people arrive in one go. Someone who blocks you while their card is already loaded drops out of the deck when you open it. To fill the decks locally, seed a crowd with `SEED_CROWD=80 npm run db:seed -w apps/server` (it also works on an already-seeded database). That's 80 people whose cards and avatars are drawn from every style option, each sharing interests with two of the demo users. Alice also gets a few interests, so every demo user has a full deck of 30 or more. The rules are in [CARD_LOADING.md](CARD_LOADING.md).
 
 ## Screenshots
 
@@ -175,7 +198,7 @@ flowchart LR
   B <-. "photos and videos: WebRTC, or the in-memory relay" .-> B2[Another browser]
 ```
 
-- **One conversation model.** Direct messages and groups are both conversations with members. Each direct-message pair has a unique key, so two people can never end up with two separate chats.
+- **One conversation model.** Direct messages and groups are both conversations with members. Each direct-message pair has a unique key, so two people can never end up with two separate chats. A message request is a direct chat with a state (pending or declined), and the single message is enforced with an atomic claim, so two sends at once can't both get through. Group invites live in their own table, so someone who hasn't joined is never a member and can't see or hear anything from the group.
 - **One event stream per user.** New messages, conversation changes, typing and presence all arrive on a single subscription. Events are published only to current members, so nobody can listen in on a chat they are not part of.
 - **Sessions** are a signed JWT in an `httpOnly`, `SameSite=Lax` cookie. The WebSocket handshake authenticates with the same cookie and rejects cross-origin connections.
 - **Photos and videos never touch the server's disk or database.** The database keeps a small metadata row per file (type, size, dimensions, a hash and a tiny blur placeholder), and a test guards against any column that could hold bytes. The files themselves stay in each person's browser storage.
@@ -206,6 +229,7 @@ docker run -d --name jessdek-db -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=jes
 cp .env.example .env     # set DATABASE_URL=postgresql://postgres:postgres@localhost:5432/jessdek
 npm run db:migrate -w apps/server
 npm run db:seed -w apps/server    # optional demo users: alice, bob, carol, dave, erin (password: SEED_PASSWORD, or a random one it prints)
+                                  # SEED_CROWD=80 adds 80 people with all sorts of cards, for the Discover deck
 npm run dev
 ```
 

@@ -12,7 +12,7 @@ test('replies in a direct chat: the quote arrives live and jumps to the original
 }) => {
   const a = await newUser(browser, unique('alice'));
   const b = await newUser(browser, unique('bob'));
-  await startDirect(b.page, a.username);
+  await startDirect(b, a);
   await send(b.page, 'are we still on for 7?');
   await expect(log(b.page).getByText('are we still on for 7?')).toBeVisible();
 
@@ -44,7 +44,7 @@ test('reactions in a group reach everyone live: set, change, remove', async ({ b
   const a = await newUser(browser, unique('alice'));
   const b = await newUser(browser, unique('bob'));
   const c = await newUser(browser, unique('carol'));
-  await createGroup(a.page, 'Hike', [b.username, c.username]);
+  await createGroup(a, 'Hike', [b, c]);
   await send(a.page, 'trail map is up');
   for (const u of [b, c]) {
     await u.page.getByRole('link', { name: /Hike/ }).click();
@@ -92,7 +92,7 @@ test('on a phone, a long-press opens the reaction bar', async ({ browser }) => {
   await closeWelcome(phone);
   await expect(phone.getByRole('heading', { name: 'Chats' })).toBeVisible();
 
-  await startDirect(a.page, name);
+  await startDirect(a, { page: phone, username: name });
   await send(a.page, 'hold me down');
   await phone.getByRole('link', { name: new RegExp(a.username) }).click();
   const bubble = log(phone).getByText('hold me down', { exact: true });

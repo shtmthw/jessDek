@@ -2,6 +2,7 @@ import type { User } from '@prisma/client';
 import * as blocks from './blocks.js';
 import { directBetween, notifyConversation } from './conversations.js';
 import { announcePresence } from './presence.js';
+import { declineRequestsFrom } from './requests.js';
 
 /**
  * Blocking and unblocking, with everything that has to follow on screen: the other person stops
@@ -18,6 +19,8 @@ async function afterChange(userId: string, targetId: string, hidden: boolean) {
 
 export async function blockUser(userId: string, targetId: string): Promise<User> {
   const target = await blocks.block(userId, targetId);
+  // Their message request or group invites to you are declined along with it.
+  await declineRequestsFrom(userId, targetId);
   await afterChange(userId, targetId, true);
   return target;
 }

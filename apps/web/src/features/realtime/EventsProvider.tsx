@@ -7,6 +7,7 @@ import {
 } from '@apollo/client';
 import { useEffect, useRef, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
+import { toast } from 'sonner';
 import {
   handleMediaRequested,
   handleMediaSignal,
@@ -26,6 +27,7 @@ import {
 import { useConnectionState } from '@/lib/connection';
 import { CONVERSATIONS, EVENTS, MARK_READ, MESSAGE_FIELDS, type Message } from '@/lib/gql';
 import { isOwnConversationExpected, playSound, primeAudio } from '@/lib/sounds';
+import { applyInvite, firstName, isIncomingRequest } from '../requests/inbox';
 import { useViewer } from '../session/ViewerProvider';
 import { getActiveConversation } from './active';
 import { clearTyping, markTyping } from './typing';
@@ -58,6 +60,14 @@ const conversationType = (client: AnyClient, id: string) =>
 
 const isKnownConversation = (client: AnyClient, id: string) =>
   client.cache.readQuery({ query: CONVERSATIONS })?.conversations.some((c) => c.id === id);
+
+/** A message request to you: it waits quietly under Requests (no sound, not in the tab title). */
+const isRequestToMe = (client: AnyClient, id: string) => {
+  const c = client.cache
+    .readQuery({ query: CONVERSATIONS })
+    ?.conversations.find((x) => x.id === id);
+  return c ? isIncomingRequest(c) : false;
+};
 
 const isLookingAt = (conversationId: string) =>
   getActiveConversation() === conversationId &&
@@ -147,7 +157,8 @@ export function EventsProvider({ children }: { children: ReactNode }) {
           if (
             message.sender.id !== viewer.id &&
             !isLookingAt(message.conversationId) &&
-            !isMuted(client, message.conversationId)
+            !isMuted(client, message.conversationId) &&
+            !isRequestToMe(client, message.conversationId)
           )
             playSound(
               conversationType(client, message.conversationId) === 'GROUP' ? 'group' : 'dm',
@@ -178,6 +189,31 @@ export function EventsProvider({ children }: { children: ReactNode }) {
             if (viewing) navigateRef.current('/', { replace: true });
           }
           break;
+        case 'InviteChanged':
+          // Quiet, like requests: the Requests row picks it up.
+          applyInvite(client, event.conversationId, event.invite);
+          break;
+        case 'RequestAnswered': {
+          const name = firstName(event.user.displayName);
+          const group = event.groupName ?? 'the group';
+          const open = () => navigateRef.current(`/c/${event.conversationId}`);
+          if (event.kind === 'DIRECT') {
+            if (event.accepted)
+              toast.success(`${name} accepted your message request`, {
+                description: 'You can chat freely now.',
+                action:
+                  getActiveConversation() === event.conversationId
+                    ? undefined
+                    : { label: 'Open', onClick: open },
+              });
+            else toast(`${name} declined your message request`);
+          } else if (event.accepted) {
+            toast.success(`${name} joined ${group}`);
+          } else {
+            toast(`${name} declined the invite to ${group}`);
+          }
+          break;
+        }
         case 'TypingStarted':
           markTyping(
             event.conversationId,

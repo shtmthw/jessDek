@@ -14,7 +14,7 @@ async function openThemeSheet(page: Page) {
 test('a theme is tried, set, and reaches the other person live', async ({ browser }) => {
   const a = await newUser(browser, unique('alice'));
   const b = await newUser(browser, unique('bob'));
-  await startDirect(a.page, b.username);
+  await startDirect(a, b);
   await send(a.page, 'new theme time');
   await b.page.getByRole('link', { name: new RegExp(a.username) }).click();
   await expect(log(b.page).getByText('new theme time')).toBeVisible();
@@ -79,7 +79,7 @@ test('group members get colours, and pick their own', async ({ browser }) => {
   const a = await newUser(browser, unique('alice'));
   const b = await newUser(browser, unique('bob'));
   const c = await newUser(browser, unique('carol'));
-  await createGroup(a.page, 'Picnic', [b.username, c.username]);
+  await createGroup(a, 'Picnic', [b, c]);
   await b.page.getByRole('link', { name: /Picnic/ }).click();
   await send(b.page, 'I bring the blanket');
   const bobRun = (page: Page) =>

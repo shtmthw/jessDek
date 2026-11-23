@@ -3,7 +3,7 @@ import type { LucideIcon } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useState, type ReactNode } from 'react';
 import { cn } from '@/lib/cn';
-import { exit, spring } from '@/lib/motion';
+import { exit, spring, tf } from '@/lib/motion';
 
 /**
  * A small action menu that springs out of its trigger. Radix handles focus, arrow keys, typeahead
@@ -36,9 +36,9 @@ export function Menu({
               <motion.div
                 className="z-50 min-w-52 rounded-2xl bg-background p-1.5 shadow-lg outline-none ring-1 ring-border"
                 style={{ transformOrigin: 'var(--radix-dropdown-menu-content-transform-origin)' }}
-                initial={{ opacity: 0, scale: 0.94, y: -4 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.97, transition: exit.fast }}
+                initial={{ opacity: 0, transform: tf({ y: -4, scale: 0.94 }) }}
+                animate={{ opacity: 1, transform: tf() }}
+                exit={{ opacity: 0, transform: tf({ scale: 0.97 }), transition: exit.fast }}
                 transition={spring.snappy}
               >
                 {children}

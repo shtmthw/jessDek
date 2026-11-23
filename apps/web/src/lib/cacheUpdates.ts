@@ -11,7 +11,7 @@ import {
   type User,
 } from './gql';
 
-type AnyClient = ApolloClient<object>;
+export type AnyClient = ApolloClient<object>;
 
 /** Adds a message to a conversation's cached history (no-op if it isn't loaded or already there). */
 export function appendMessage(client: AnyClient, message: Message) {

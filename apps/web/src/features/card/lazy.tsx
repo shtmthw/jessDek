@@ -10,6 +10,7 @@ const load = {
   settings: () => import('../settings/SettingsPage'),
   cardPages: () => import('./CardPages'),
   cardDialog: () => import('./CardDialog'),
+  discover: () => import('../discover/pages'),
 };
 
 export const CardStudio = lazy(() => load.cardStudio().then((m) => ({ default: m.CardStudio })));
@@ -24,6 +25,11 @@ export const PublicCardPage = lazy(() =>
   load.cardPages().then((m) => ({ default: m.PublicCardPage })),
 );
 export const CardDialog = lazy(() => load.cardDialog().then((m) => ({ default: m.CardDialog })));
+export const DiscoverFront = lazy(() =>
+  load.discover().then((m) => ({ default: m.DiscoverFront })),
+);
+export const DeckFanPage = lazy(() => load.discover().then((m) => ({ default: m.DeckFanPage })));
+export const DeckCardPage = lazy(() => load.discover().then((m) => ({ default: m.DeckCardPage })));
 
 let prefetched = false;
 /** Fetch every split-out screen in the background, once, when the browser has a moment. */

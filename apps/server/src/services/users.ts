@@ -49,7 +49,7 @@ const AVATAR_MAX = 1024;
 const BAD_AVATAR = 'That avatar can’t be saved';
 
 /** Parses and re-serializes a recipe, so only a flat, small object is ever stored. */
-function parseAvatar(raw: unknown): string | null {
+export function parseAvatar(raw: unknown): string | null {
   if (raw === null || raw === undefined) return null;
   if (typeof raw !== 'string' || raw.length > AVATAR_MAX * 2) {
     throw fail('BAD_USER_INPUT', BAD_AVATAR, { field: 'avatar' });

@@ -2,7 +2,6 @@ import { useMutation } from '@apollo/client';
 import { Check, Sparkles } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
-  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -71,6 +70,7 @@ export function ThemeSheet({
   const saved = useMemo(() => themeSpec(parseTheme(conversation.theme)), [conversation.theme]);
   const savedColor = conversation.memberColors.find((m) => m.userId === viewer.id)?.color ?? null;
   const [tab, setTab] = useState<Tab>('themes');
+  const panel = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState(saved);
   const [color, setColor] = useState<string | null>(savedColor);
   const [saving, setSaving] = useState(false);
@@ -87,35 +87,6 @@ export function ThemeSheet({
     }
     wasOpen.current = open;
   }, [open, saved, savedColor]);
-
-  // The pinned preview gets its hairline once the options scroll under it. The scroller is also
-  // told how much of it the pinned preview and footer cover (scroll padding), so an option brought
-  // into view by the keyboard lands where it can be seen, not under either of them.
-  const [stuck, setStuck] = useState(false);
-  const unpin = useRef<(() => void) | null>(null);
-  const pinned = useCallback((node: HTMLDivElement | null) => {
-    unpin.current?.();
-    unpin.current = null;
-    const scroller = node?.parentElement?.closest<HTMLElement>('.overflow-y-auto');
-    if (!node || !scroller) return;
-    const onScroll = () => setStuck(scroller.scrollTop > 4);
-    const pad = () => {
-      const footer = scroller.querySelector<HTMLElement>('[data-sheet-footer]');
-      scroller.style.scrollPaddingTop = `${node.offsetHeight + 8}px`;
-      scroller.style.scrollPaddingBottom = `${(footer?.offsetHeight ?? 0) + 8}px`;
-    };
-    onScroll();
-    pad();
-    const ro = new ResizeObserver(pad);
-    ro.observe(node);
-    scroller.addEventListener('scroll', onScroll, { passive: true });
-    unpin.current = () => {
-      ro.disconnect();
-      scroller.removeEventListener('scroll', onScroll);
-      scroller.style.scrollPaddingTop = '';
-      scroller.style.scrollPaddingBottom = '';
-    };
-  }, []);
 
   const themeChanged = !sameTheme(draft, saved);
   const colorChanged = group && color !== savedColor;
@@ -181,19 +152,10 @@ export function ThemeSheet({
           : `You and ${firstName(conversation.title)} both see it.`
       }
       className="md:max-w-lg"
-    >
-      <div className="flex flex-col gap-4">
-        {/* The preview and tabs stay put while the options scroll under them, so whatever you
-            pick further down is still shown. The hairline appears once something is beneath. */}
-        <div
-          ref={pinned}
-          data-stuck={stuck || undefined}
-          className={cn(
-            'sticky -top-2 z-10 -mx-5 -mt-2 flex flex-col gap-3 bg-background px-5 pb-3 pt-2',
-            'border-b border-transparent transition-[border-color] duration-200',
-            'data-[stuck]:border-border',
-          )}
-        >
+      // The preview and tabs stay above the options, which scroll on their own, so whatever you pick
+      // further down is still shown.
+      header={
+        <div className="flex flex-col gap-3">
           <MiniChat
             spec={draft}
             sampleName={group && sample ? firstName(sample.displayName) : undefined}
@@ -201,12 +163,15 @@ export function ThemeSheet({
               sampleColor ? (memberVars(draft, sampleColor) as CSSProperties) : undefined
             }
           />
-
           <Segmented<Tab>
             kind="tabs"
             label="Theme options"
             value={tab}
-            onChange={setTab}
+            onChange={(next) => {
+              setTab(next);
+              // A new tab starts at its top, not where the last one was scrolled to.
+              panel.current?.closest('.overflow-y-auto')?.scrollTo({ top: 0 });
+            }}
             options={[
               { value: 'themes', label: 'Themes' },
               { value: 'custom', label: 'Custom' },
@@ -214,7 +179,19 @@ export function ThemeSheet({
             ]}
           />
         </div>
-
+      }
+      footer={
+        <>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button onClick={() => void save()} loading={saving} data-theme-save>
+            {label}
+          </Button>
+        </>
+      }
+    >
+      <div ref={panel} className="flex flex-col gap-4">
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
             key={tab}
@@ -242,18 +219,6 @@ export function ThemeSheet({
             )}
           </motion.div>
         </AnimatePresence>
-
-        <div
-          data-sheet-footer
-          className="sticky -bottom-5 z-10 -mx-5 -mb-5 flex justify-end gap-2 border-t border-border bg-background px-5 py-3"
-        >
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button onClick={() => void save()} loading={saving} data-theme-save>
-            {label}
-          </Button>
-        </div>
       </div>
     </Dialog>
   );

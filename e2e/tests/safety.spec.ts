@@ -13,7 +13,7 @@ test('blocking ends a direct chat for both people, and unblocking brings it back
 }) => {
   const a = await newUser(browser, unique('alice'));
   const b = await newUser(browser, unique('bob'));
-  await startDirect(a.page, b.username);
+  await startDirect(a, b);
   await send(a.page, 'hello');
   await row(b.page, /alice/i).click();
   await expect(b.page.getByRole('region', { name: /Chat with/ }).getByText('Online')).toBeVisible();
@@ -46,7 +46,7 @@ test('someone who blocked you can’t be messaged or added; Settings lists and u
   const a = await newUser(browser, unique('alice'));
   const c = await newUser(browser, unique('carol'));
   const b = await newUser(browser, unique('bob'));
-  await createGroup(a.page, 'Hikers', [b.username, c.username]);
+  await createGroup(a, 'Hikers', [b, c]);
 
   // Carol blocks Alice from the group's member list.
   await row(c.page, /Hikers/).click();
@@ -81,7 +81,7 @@ test('someone who blocked you can’t be messaged or added; Settings lists and u
 test('a muted chat is silent: grey badge, not in the tab title', async ({ browser }) => {
   const a = await newUser(browser, unique('alice'));
   const b = await newUser(browser, unique('bob'));
-  await startDirect(b.page, a.username);
+  await startDirect(b, a);
   await send(b.page, 'first');
   await row(a.page, /bob/i).click();
   await chatMenu(a.page, /Mute notifications/);
@@ -103,7 +103,7 @@ test('a muted chat is silent: grey badge, not in the tab title', async ({ browse
 test('a removed chat leaves the list and comes back with the next message', async ({ browser }) => {
   const a = await newUser(browser, unique('alice'));
   const b = await newUser(browser, unique('bob'));
-  await startDirect(a.page, b.username);
+  await startDirect(a, b);
   await send(a.page, 'hi');
   await chatMenu(a.page, /Remove chat/);
   await expect(a.page.getByText('Chat removed')).toBeVisible();
@@ -123,7 +123,7 @@ test('the group owner can remove a member', async ({ browser }) => {
   const a = await newUser(browser, unique('alice'));
   const b = await newUser(browser, unique('bob'));
   const c = await newUser(browser, unique('carol'));
-  await createGroup(a.page, 'Book club', [b.username, c.username]);
+  await createGroup(a, 'Book club', [b, c]);
   await expect(row(c.page, /Book club/)).toBeVisible();
 
   // Bob isn't the owner: no remove option for him.

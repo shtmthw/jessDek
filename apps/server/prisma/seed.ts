@@ -3,6 +3,8 @@
 import { randomBytes } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { hashPassword } from '../src/auth.js';
+import { interestKeysOf } from '../src/services/cards.js';
+import { seedCrowd as addCrowd } from './crowd.js';
 import { AVATAR_COLORS } from '../src/services/users.js';
 
 const prisma = new PrismaClient();
@@ -188,6 +190,7 @@ const cards: Record<string, { card: string; cardShared: boolean }> = {
 async function main() {
   if ((await prisma.user.count()) > 0) {
     console.log('Seed skipped: database already has users.');
+    await seedCrowd();
     return;
   }
   const passwordHash = await hashPassword(PASSWORD);
@@ -200,6 +203,8 @@ async function main() {
         passwordHash,
         avatarColor: AVATAR_COLORS[(i * 3) % AVATAR_COLORS.length]!,
         ...cards[p.username],
+        // What the card deck matches on (services/cards.ts writes it on every save).
+        interestKeys: interestKeysOf(cards[p.username]?.card ?? null),
         // Demo accounts have "been around": the welcome is for new sign-ups.
         welcomedAt: new Date(),
       },
@@ -358,6 +363,15 @@ async function main() {
       : `Seeded ${people.length} users (${names}) with a random password, shown only now: ${PASSWORD}\n` +
           'Set SEED_PASSWORD (in .env) to choose it instead.',
   );
+  await seedCrowd();
+}
+
+/** SEED_CROWD=<n> adds n more people with all sorts of cards, for the Discover deck (see crowd.ts). */
+async function seedCrowd() {
+  const count = Math.min(300, Math.max(0, Number(process.env.SEED_CROWD) || 0));
+  if (count === 0) return;
+  const added = await addCrowd(prisma, count, await hashPassword(PASSWORD));
+  console.log(`Crowd: added ${added} of ${count} people with cards (the rest were already there).`);
 }
 
 main()

@@ -15,6 +15,49 @@ export const typeDefs = /* GraphQL */ `
     blockedUsers: [User!]!
     "Someone's card. Signed out: only cards shared by link. Null when there's none to show you."
     card(username: String!): Card
+    "Your pending group invites, newest first."
+    invites: [GroupInvite!]!
+    "Starts a deck of people who share an interest with you: a random middle card, how many matches there are, and the first cards."
+    deckStart: DeckStart!
+    "More cards from one end of a large deck. RIGHT: ids after the cursor, ascending. LEFT: ids before it, descending. Wraps around the ends."
+    deckCards(dir: DeckDir!, cursor: ID!, limit: Int = 5): DeckPage!
+    "One person's card as the deck shows it. Null when they aren't available to you any more (a block, either way)."
+    deckCard(id: ID!): Card
+  }
+
+  enum DeckMode {
+    "No matches yet."
+    EMPTY
+    "Up to 21 matches: all of them come in deckStart.cards, middle card first."
+    SMALL
+    "More than 21: the middle card and a batch each side, the rest on demand."
+    LARGE
+  }
+
+  enum DeckDir {
+    LEFT
+    RIGHT
+  }
+
+  type DeckStart {
+    mode: DeckMode!
+    "How many people matched when the deck started."
+    n: Int!
+    "SMALL: every match. The middle card first, then by id ascending, wrapping. Empty otherwise."
+    cards: [Card!]!
+    "LARGE: the middle card."
+    m: Card
+    "LARGE: the cards right of the middle, nearest first."
+    right: [Card!]!
+    "LARGE: the cards left of the middle, nearest first."
+    left: [Card!]!
+  }
+
+  type DeckPage {
+    "Nearest first."
+    cards: [Card!]!
+    "True when the end of the deck was hit and the rest came from the other end."
+    wrapped: Boolean!
   }
 
   enum MediaPart {
@@ -55,9 +98,18 @@ export const typeDefs = /* GraphQL */ `
     "Marks the one-time welcome as seen, on every device."
     dismissWelcome: Viewer!
 
+    "Opens your direct chat with someone. A new one is a message request: you can send one message, text only, until they accept."
     startDirect(username: String!): Conversation!
+    "Recipient only. Accepting makes it an ordinary chat (returned); declining is final (returns null)."
+    respondToRequest(conversationId: ID!, accept: Boolean!): Conversation
+    "You're the only member at first: everyone else gets an invite."
     createGroup(name: String!, usernames: [String!]!): Conversation!
+    "Invites people to the group. They join if they accept. Someone who declined can't be invited again."
     addMembers(conversationId: ID!, usernames: [String!]!): Conversation!
+    "Join the group (returns it) or decline the invite (returns null)."
+    respondToInvite(conversationId: ID!, accept: Boolean!): Conversation
+    "Whoever sent the invite, or the group's owner, takes back a pending invite."
+    cancelInvite(conversationId: ID!, userId: ID!): Conversation!
     renameGroup(conversationId: ID!, name: String!): Conversation!
     leaveGroup(conversationId: ID!): Boolean!
     "Group owners only. Their earlier messages stay."
@@ -202,6 +254,49 @@ export const typeDefs = /* GraphQL */ `
     themeSetAt: String
     "Groups: the colours members picked for themselves (the others are automatic)."
     memberColors: [MemberColor!]!
+    "Direct chats: a message request that hasn't been accepted. Null for an ordinary chat."
+    request: MessageRequest
+    "Groups: people invited who haven't joined, pending or declined, oldest first."
+    invites: [MemberInvite!]!
+  }
+
+  enum RequestState {
+    PENDING
+    DECLINED
+  }
+
+  enum InviteState {
+    PENDING
+    DECLINED
+  }
+
+  type MessageRequest {
+    state: RequestState!
+    "You started it, so the other person answers."
+    sentByMe: Boolean!
+    "When its one message was sent. Null: not yet (the other person can't see it)."
+    sentAt: String
+    respondedAt: String
+  }
+
+  "Someone invited to a group you're in."
+  type MemberInvite {
+    user: User!
+    invitedBy: User!
+    state: InviteState!
+    createdAt: String!
+    respondedAt: String
+  }
+
+  "An invite to a group you're not in yet: just enough to decide."
+  type GroupInvite {
+    "The group's conversation id."
+    id: ID!
+    conversationId: ID!
+    name: String!
+    invitedBy: User!
+    members: [User!]!
+    createdAt: String!
   }
 
   type MemberColor {
@@ -304,6 +399,8 @@ export const typeDefs = /* GraphQL */ `
     | MediaSignal
     | UserUpdated
     | ReactionChanged
+    | InviteChanged
+    | RequestAnswered
 
   type MessageAdded {
     conversationId: ID!
@@ -314,6 +411,22 @@ export const typeDefs = /* GraphQL */ `
   type ConversationUpdated {
     conversationId: ID!
     conversation: Conversation
+  }
+
+  "Your invite to this group changed. \`invite\` is null once it's gone (answered, cancelled, or the group is gone)."
+  type InviteChanged {
+    conversationId: ID!
+    invite: GroupInvite
+  }
+
+  "Someone answered your message request or your invite to a group."
+  type RequestAnswered {
+    conversationId: ID!
+    kind: ConversationType!
+    "The group's name, for invites."
+    groupName: String
+    user: User!
+    accepted: Boolean!
   }
 
   "Someone's reaction to a message in this chat was added, changed or removed."

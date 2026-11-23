@@ -145,11 +145,21 @@ function Name({
   );
 }
 
-function Header({ card, user, theme }: { card: CardRecipe; user: CardUser; theme: CardTheme }) {
+function Header({
+  card,
+  user,
+  theme,
+  lite,
+}: {
+  card: CardRecipe;
+  user: CardUser;
+  theme: CardTheme;
+  lite?: boolean;
+}) {
   const both = card.name === 'both';
   const cutout = card.frame === 'none';
   const avatar = (size: number, fade = false) => (
-    <CardAvatar user={user} card={card} theme={theme} size={size} fade={fade} />
+    <CardAvatar user={user} card={card} theme={theme} size={size} fade={fade} lite={lite} />
   );
   switch (card.layout) {
     case 'centered':
@@ -530,6 +540,19 @@ const FLUSH_BORDERS = new Set(['thin', 'thick', 'double', 'frame', 'foil']);
 /** How far inside a flush border's outer edge the face stops (layout px). */
 const TRIM = 1;
 
+/**
+ * A light card's edge and shadow (DECK_QUALITY_PLAN.md): the border as a plain inset ring in the
+ * card's line colour, and one soft shadow, instead of the border art, shape mask and blurred filters.
+ */
+const liteShadow = (card: CardRecipe, theme: CardTheme) =>
+  [
+    card.border !== 'none' ? `inset 0 0 0 2px ${theme.line}` : null,
+    '0 1px 2px rgb(0 0 0 / 0.12)',
+    '0 12px 24px -8px rgb(0 0 0 / 0.3)',
+  ]
+    .filter(Boolean)
+    .join(', ');
+
 /** The card face at its layout size (320 × 540). `CardView` scales it. */
 export const CardFace = memo(function CardFace({
   card,
@@ -538,6 +561,7 @@ export const CardFace = memo(function CardFace({
   messaging,
   hideStickers,
   onAboutFit,
+  lite = false,
 }: {
   card: CardRecipe;
   user: CardUser;
@@ -545,6 +569,11 @@ export const CardFace = memo(function CardFace({
   messaging?: boolean;
   hideStickers?: boolean;
   onAboutFit?: (fits: boolean) => void;
+  /**
+   * The light card (Discover's "Light" deck): the same colours, text and avatar, without the
+   * pattern, finish, border art, stickers and blurred shadows, which cost the most to draw.
+   */
+  lite?: boolean;
 }) {
   const theme = cardTheme(card);
   useCardFont(card.font);
@@ -563,29 +592,36 @@ export const CardFace = memo(function CardFace({
   // smoothed at the same pixels and the face's colour leaks past the border as a thin halo at the
   // corners. So the face is trimmed a hair inside the border's outer edge, and the border is drawn
   // outside that trim.
-  const flush = FLUSH_BORDERS.has(card.border);
+  const flush = !lite && FLUSH_BORDERS.has(card.border);
   return (
     <div className="relative" style={{ width: CARD_W, height: CARD_H }}>
       <article
         aria-label={`${user.displayName}’s card`}
+        data-quality={lite ? 'light' : 'full'}
         className="absolute inset-0 overflow-hidden"
         style={{
           borderRadius: theme.radius,
           background: theme.bg.css,
           color: theme.ink,
           fontFamily: f.family,
-          boxShadow: faceShadow(card.border, theme),
-          clipPath: flush
-            ? `inset(${TRIM}px round ${Math.max(0, theme.radius - TRIM)}px)`
-            : undefined,
-          ...faceMask(card.border),
+          ...(lite
+            ? { boxShadow: liteShadow(card, theme) }
+            : {
+                boxShadow: faceShadow(card.border, theme),
+                clipPath: flush
+                  ? `inset(${TRIM}px round ${Math.max(0, theme.radius - TRIM)}px)`
+                  : undefined,
+                ...faceMask(card.border),
+              }),
         }}
       >
-        {card.pattern !== 'none' ? (
-          <Pattern id={card.pattern} color={patternColor} opacity={patternOpacity} />
+        {!lite && card.pattern !== 'none' ? (
+          <div data-layer="pattern" className="contents">
+            <Pattern id={card.pattern} color={patternColor} opacity={patternOpacity} />
+          </div>
         ) : null}
         <div className="relative flex flex-col" style={{ height: CARD_H }}>
-          <Header card={card} user={user} theme={theme} />
+          <Header card={card} user={user} theme={theme} lite={lite} />
           {divider(3)}
           <div style={{ paddingInline: PAD }}>
             <Interests card={card} theme={theme} />
@@ -603,17 +639,29 @@ export const CardFace = memo(function CardFace({
             busy={messaging}
           />
         </div>
-        <FinishLayer kind={card.finish} theme={theme} />
-        {flush ? null : (
-          <BorderLayer kind={card.border} theme={theme} width={CARD_W} height={CARD_H} />
+        {lite ? null : (
+          <div data-layer="finish" className="contents">
+            <FinishLayer kind={card.finish} theme={theme} />
+          </div>
+        )}
+        {lite || flush ? null : (
+          <div data-layer="border" className="contents">
+            <BorderLayer kind={card.border} theme={theme} width={CARD_W} height={CARD_H} />
+          </div>
         )}
       </article>
       {flush ? (
-        <BorderLayer kind={card.border} theme={theme} width={CARD_W} height={CARD_H} />
+        <div data-layer="border" className="contents">
+          <BorderLayer kind={card.border} theme={theme} width={CARD_W} height={CARD_H} />
+        </div>
       ) : null}
-      {hideStickers
-        ? null
-        : card.stickers.map((s, i) => <PlacedSticker key={`${i}:${s.k ?? s.e}`} sticker={s} />)}
+      {hideStickers || lite || card.stickers.length === 0 ? null : (
+        <div data-layer="stickers" className="contents">
+          {card.stickers.map((s, i) => (
+            <PlacedSticker key={`${i}:${s.k ?? s.e}`} sticker={s} />
+          ))}
+        </div>
+      )}
     </div>
   );
 });
@@ -658,6 +706,7 @@ export function CardView({
   messaging = false,
   tilt = false,
   shadow = true,
+  lite = false,
   className,
   style,
   hideStickers,
@@ -676,6 +725,8 @@ export function CardView({
   tilt?: boolean;
   /** A soft drop shadow under the card. */
   shadow?: boolean;
+  /** The light card (see `CardFace`): cheaper to build and draw. Its shadow is part of the face. */
+  lite?: boolean;
   className?: string;
   style?: CSSProperties;
   hideStickers?: boolean;
@@ -732,9 +783,10 @@ export function CardView({
         aspectRatio: measured ? undefined : `${CARD_W} / ${CARD_H}`,
         perspective: canTilt ? 900 : undefined,
         // The shadow sits on the wrapper: a filter on the tilting layer would repaint it each frame.
-        filter: shadow
-          ? 'drop-shadow(0 1px 1.5px rgb(0 0 0 / 0.12)) drop-shadow(0 10px 18px rgb(0 0 0 / 0.16))'
-          : undefined,
+        filter:
+          shadow && !lite
+            ? 'drop-shadow(0 1px 1.5px rgb(0 0 0 / 0.12)) drop-shadow(0 10px 18px rgb(0 0 0 / 0.16))'
+            : undefined,
         ...style,
       }}
       onPointerMove={canTilt ? track : undefined}
@@ -773,6 +825,7 @@ export function CardView({
                 onMessage={onMessage}
                 messaging={messaging}
                 hideStickers={hideStickers}
+                lite={lite}
                 onAboutFit={onAboutFit}
               />
               {typeof children === 'function' ? children(scale) : children}

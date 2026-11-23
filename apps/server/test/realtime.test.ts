@@ -7,7 +7,18 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { config } from '../src/config.js';
 import { prisma } from '../src/db.js';
 import { relayTimeouts } from '../src/relay.js';
-import { Client, newApp, resetDb, signUp } from './helpers.js';
+import {
+  Client,
+  RESPOND_TO_INVITE,
+  connect,
+  groupWith,
+  newApp,
+  resetDb,
+  settle,
+  signUp,
+  types,
+  until,
+} from './helpers.js';
 
 let app: FastifyInstance;
 let port: number;
@@ -40,6 +51,8 @@ const EVENTS = `subscription { events {
   ... on MediaSignal { requestId type payload fromUserId fromPeerId }
   ... on UserUpdated { user { username displayName avatarColor avatar } }
   ... on ReactionChanged { conversationId message { id reactions { emoji user { username } } } }
+  ... on InviteChanged { conversationId invite { name invitedBy { username } members { username } } }
+  ... on RequestAnswered { conversationId kind groupName user { username } accepted }
 } }`;
 
 /** Opens a subscription as the given (signed-in) client and collects what arrives. */
@@ -85,24 +98,13 @@ function listen(cookie: string, peerId?: string) {
   return { events, errors, request };
 }
 
-const types = (peer: { events: any[] }, typename: string) =>
-  peer.events.filter((e) => e.__typename === typename);
-
-const until = async (cond: () => boolean, ms = 3000) => {
-  const start = Date.now();
-  while (!cond()) {
-    if (Date.now() - start > ms) throw new Error('timed out waiting for condition');
-    await new Promise((r) => setTimeout(r, 25));
-  }
-};
-const settle = (ms = 400) => new Promise((r) => setTimeout(r, ms));
-
 async function setup() {
   const [a, b, eve] = [new Client(app), new Client(app), new Client(app)];
   await signUp(a, 'alice');
   await signUp(b, 'bob');
   await signUp(eve, 'eve');
-  const dm = (await a.gql(`mutation { startDirect(username: "bob") { id } }`)).data!.startDirect;
+  // Alice and Bob are chat partners (Alice's request, Bob accepted); Eve is a stranger to both.
+  const dm = await connect(a, b);
   return { a, b, eve, dm };
 }
 
@@ -157,17 +159,45 @@ describe('realtime events', () => {
     expect(alice.events.some((e) => e.__typename === 'TypingStarted')).toBe(false);
   });
 
-  it('notifies a user when they are added to a new group (resolved from their point of view)', async () => {
-    const { a, b } = await setup();
+  it('tells someone about a group invite (resolved from their point of view), then the group once they join', async () => {
+    const { a, b, eve } = await setup();
+    const alice = listen(a.cookie);
     const bob = listen(b.cookie);
+    const spy = listen(eve.cookie);
     await settle();
 
-    await a.gql(`mutation { createGroup(name: "Trip", usernames: ["bob"]) { id } }`);
+    const g = (await a.gql(`mutation { createGroup(name: "Trip", usernames: ["bob"]) { id } }`))
+      .data!.createGroup;
+    // Bob learns of the invite, with just enough to decide: the name, the inviter, who's in.
+    await until(() => types(bob, 'InviteChanged').length === 1);
+    expect(types(bob, 'InviteChanged')[0]).toMatchObject({
+      conversationId: g.id,
+      invite: { name: 'Trip', invitedBy: { username: 'alice' }, members: [{ username: 'alice' }] },
+    });
+    // The group isn't his yet: no chat-list update, nothing said in it.
+    await settle();
+    expect(types(bob, 'ConversationUpdated')).toEqual([]);
+
+    await b.gql(RESPOND_TO_INVITE, { c: g.id, accept: true });
+    // The invite is gone for him, the group is his, and Alice is told he joined.
+    await until(() => types(bob, 'InviteChanged').length === 2);
+    expect(types(bob, 'InviteChanged')[1].invite).toBeNull();
     await until(() =>
       bob.events.some(
         (e) => e.__typename === 'ConversationUpdated' && e.conversation?.title === 'Trip',
       ),
     );
+    await until(() => types(alice, 'RequestAnswered').length === 1);
+    expect(types(alice, 'RequestAnswered')[0]).toEqual({
+      __typename: 'RequestAnswered',
+      conversationId: g.id,
+      kind: 'GROUP',
+      groupName: 'Trip',
+      user: { username: 'bob' },
+      accepted: true,
+    });
+    await settle();
+    expect(spy.events).toEqual([]);
   });
 
   it('tracks presence for people you share a conversation with', async () => {
@@ -226,9 +256,7 @@ describe('realtime events', () => {
     const { a, b, eve } = await setup();
     const carol = new Client(app);
     await signUp(carol, 'carol');
-    const g = (
-      await a.gql(`mutation { createGroup(name: "Trip", usernames: ["bob", "carol"]) { id } }`)
-    ).data!.createGroup;
+    const g = await groupWith(a, 'Trip', [b, carol]);
     const msg = (
       await a.gql(`mutation($c: ID!) { sendMessage(conversationId: $c, body: "7pm?") { id } }`, {
         c: g.id,
@@ -262,8 +290,7 @@ describe('realtime events', () => {
 
   it('tells every member of a chat about a new theme or member colour, and nobody else', async () => {
     const { a, b, eve } = await setup();
-    const g = (await a.gql(`mutation { createGroup(name: "Trip", usernames: ["bob"]) { id } }`))
-      .data!.createGroup;
+    const g = await groupWith(a, 'Trip', [b]);
     const alice = listen(a.cookie);
     const bob = listen(b.cookie);
     const spy = listen(eve.cookie);
@@ -481,9 +508,7 @@ describe('media signaling', () => {
 
   it('cancels live requests when someone leaves the group', async () => {
     const { a, b, eve } = await setup();
-    const group = (
-      await a.gql(`mutation { createGroup(name: "Trip", usernames: ["bob", "eve"]) { id } }`)
-    ).data!.createGroup;
+    const group = await groupWith(a, 'Trip', [b, eve]);
     const [pa, pb, pe] = [randomUUID(), randomUUID(), randomUUID()];
     const a1 = listen(a.cookie, pa);
     const b1 = listen(b.cookie, pb);
@@ -557,7 +582,7 @@ describe('media relay', () => {
     return { a, b, eve, pa, pb, holder, requester, requestId };
   }
 
-  function connect(cookie: string, relayId: string, peer: string) {
+  function joinRelay(cookie: string, relayId: string, peer: string) {
     return new Promise<{
       ws?: WebSocket;
       status?: number;
@@ -592,8 +617,8 @@ describe('media relay', () => {
       payload: JSON.stringify({ relayId, key: '' }),
     });
 
-    const h = await connect(a.cookie, relayId, pa);
-    const r = await connect(b.cookie, relayId, pb);
+    const h = await joinRelay(a.cookie, relayId, pa);
+    const r = await joinRelay(b.cookie, relayId, pb);
     r.ws!.send('{"t":"get"}');
     await until(() => h.messages.length === 1);
     expect(h.messages[0]).toMatchObject({ binary: false });
@@ -619,13 +644,13 @@ describe('media relay', () => {
     const pb2 = randomUUID();
     listen(b.cookie, pb2); // Bob's other tab
     await settle();
-    expect((await connect(b.cookie, relayId, pb2)).status).toBe(403);
-    expect((await connect(eve.cookie, relayId, pa)).status).toBe(403); // someone else's peer id
-    expect((await connect(b.cookie, relayId, pa)).status).toBe(403); // a peer id that isn't yours
-    expect((await connect('', relayId, pa)).status).toBe(403);
-    expect((await connect(a.cookie, randomUUID(), pa)).status).toBe(403);
-    expect((await connect(a.cookie, relayId, pa)).ws).toBeDefined();
-    expect((await connect(a.cookie, relayId, pa)).status).toBe(403); // that slot is taken
+    expect((await joinRelay(b.cookie, relayId, pb2)).status).toBe(403);
+    expect((await joinRelay(eve.cookie, relayId, pa)).status).toBe(403); // someone else's peer id
+    expect((await joinRelay(b.cookie, relayId, pa)).status).toBe(403); // a peer id that isn't yours
+    expect((await joinRelay('', relayId, pa)).status).toBe(403);
+    expect((await joinRelay(a.cookie, randomUUID(), pa)).status).toBe(403);
+    expect((await joinRelay(a.cookie, relayId, pa)).ws).toBeDefined();
+    expect((await joinRelay(a.cookie, relayId, pa)).status).toBe(403); // that slot is taken
   });
 
   it('only lets the requester open a relay, to a holder that was asked', async () => {
@@ -649,8 +674,8 @@ describe('media relay', () => {
     const { a, b, pa, pb, requester, requestId } = await live(1000);
     const relayId = (await requester.request(OPEN_RELAY, { r: requestId, h: pa, k: '' })).data!
       .openRelay;
-    const h = await connect(a.cookie, relayId, pa);
-    const r = await connect(b.cookie, relayId, pb);
+    const h = await joinRelay(a.cookie, relayId, pa);
+    const r = await joinRelay(b.cookie, relayId, pb);
     h.ws!.send(Buffer.alloc(40_000));
     h.ws!.send(Buffer.alloc(40_000));
     expect(await h.closed).toBe(4413);
@@ -662,7 +687,7 @@ describe('media relay', () => {
     const { a, pa, requester, requestId } = await live();
     const relayId = (await requester.request(OPEN_RELAY, { r: requestId, h: pa, k: '' })).data!
       .openRelay;
-    const h = await connect(a.cookie, relayId, pa);
+    const h = await joinRelay(a.cookie, relayId, pa);
     expect(await h.closed).toBe(4408);
   });
 
@@ -674,7 +699,7 @@ describe('media relay', () => {
     try {
       const res = await requester.request(OPEN_RELAY, { r: requestId, h: pa, k: '' });
       expect(res.errors![0]!.extensions!.code).toBe('FORBIDDEN');
-      expect((await connect(a.cookie, relayId, pa)).status).toBe(403);
+      expect((await joinRelay(a.cookie, relayId, pa)).status).toBe(403);
     } finally {
       config.media.relay = true;
     }
@@ -684,9 +709,7 @@ describe('media relay', () => {
 describe('blocks in realtime', () => {
   it('stops typing and presence crossing a block, and keeps media off direct links', async () => {
     const { a, b, eve } = await setup();
-    const group = (
-      await a.gql(`mutation { createGroup(name: "Trip", usernames: ["bob", "eve"]) { id } }`)
-    ).data!.createGroup;
+    const group = await groupWith(a, 'Trip', [b, eve]);
     const ids = Object.fromEntries((await prisma.user.findMany()).map((u) => [u.username, u.id]));
     const [pa, pb, pe] = [randomUUID(), randomUUID(), randomUUID()];
     const alice = listen(a.cookie, pa);

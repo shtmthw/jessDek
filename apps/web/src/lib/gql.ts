@@ -134,6 +134,37 @@ export interface Conversation {
   themeSetAt: string | null;
   /** Groups: colours members picked for themselves (the rest are automatic). */
   memberColors: MemberColor[];
+  /** Direct chats: a message request that hasn't been accepted. Null: an ordinary chat. */
+  request: MessageRequest | null;
+  /** Groups: people invited who haven't joined (pending or declined). */
+  invites: MemberInvite[];
+}
+export interface MessageRequest {
+  __typename?: 'MessageRequest';
+  state: 'PENDING' | 'DECLINED';
+  /** You started it; the other person answers. */
+  sentByMe: boolean;
+  /** When its one message was sent. Null: not yet. */
+  sentAt: string | null;
+  respondedAt: string | null;
+}
+export interface MemberInvite {
+  __typename?: 'MemberInvite';
+  user: User;
+  invitedBy: Pick<User, 'id' | 'displayName'> & { __typename?: 'User' };
+  state: 'PENDING' | 'DECLINED';
+  createdAt: string;
+  respondedAt: string | null;
+}
+/** An invite to a group you're not in yet. */
+export interface GroupInvite {
+  __typename?: 'GroupInvite';
+  id: string;
+  conversationId: string;
+  name: string;
+  invitedBy: User;
+  members: User[];
+  createdAt: string;
 }
 export interface MemberColor {
   __typename?: 'MemberColor';
@@ -167,6 +198,17 @@ export type ChatEvent =
       __typename: 'ReactionChanged';
       conversationId: string;
       message: { __typename?: 'Message'; id: string; reactions: Reaction[] };
+    }
+  /** Your invite to a group changed; null once it's gone. */
+  | { __typename: 'InviteChanged'; conversationId: string; invite: GroupInvite | null }
+  /** Someone answered your message request or group invite. */
+  | {
+      __typename: 'RequestAnswered';
+      conversationId: string;
+      kind: 'DIRECT' | 'GROUP';
+      groupName: string | null;
+      user: User;
+      accepted: boolean;
     }
   | MediaRequestedEvent
   | MediaSignalEvent;
@@ -306,6 +348,24 @@ export const CONVERSATION_FIELDS = gql`
     memberColors {
       userId
       color
+    }
+    request {
+      state
+      sentByMe
+      sentAt
+      respondedAt
+    }
+    invites {
+      state
+      createdAt
+      respondedAt
+      user {
+        ...UserFields
+      }
+      invitedBy {
+        id
+        displayName
+      }
     }
     lastReaction {
       emoji
@@ -469,6 +529,68 @@ export const CARD: Doc<{ card: Card | null }, { username: string }> = gql`
   ${CARD_FIELDS}
 `;
 
+// ---- The card deck (CARD_LOADING.md, CARD_DECK_PLAN.md) ----
+
+export type DeckDir = 'LEFT' | 'RIGHT';
+export interface DeckStart {
+  __typename?: 'DeckStart';
+  mode: 'EMPTY' | 'SMALL' | 'LARGE';
+  n: number;
+  /** SMALL: every match, the middle card first. */
+  cards: Card[];
+  /** LARGE: the middle card, and a batch each side (nearest first). */
+  m: Card | null;
+  right: Card[];
+  left: Card[];
+}
+
+export const DECK_START: Doc<{ deckStart: DeckStart }> = gql`
+  query DeckStart {
+    deckStart {
+      mode
+      n
+      cards {
+        ...CardFields
+      }
+      m {
+        ...CardFields
+      }
+      right {
+        ...CardFields
+      }
+      left {
+        ...CardFields
+      }
+    }
+  }
+  ${CARD_FIELDS}
+`;
+
+export const DECK_CARDS: Doc<
+  { deckCards: { __typename?: 'DeckPage'; cards: Card[]; wrapped: boolean } },
+  { dir: DeckDir; cursor: string; limit?: number }
+> = gql`
+  query DeckCards($dir: DeckDir!, $cursor: ID!, $limit: Int) {
+    deckCards(dir: $dir, cursor: $cursor, limit: $limit) {
+      wrapped
+      cards {
+        ...CardFields
+      }
+    }
+  }
+  ${CARD_FIELDS}
+`;
+
+/** Null: they aren't available to you any more (the spec's 410). */
+export const DECK_CARD: Doc<{ deckCard: Card | null }, { id: string }> = gql`
+  query DeckCard($id: ID!) {
+    deckCard(id: $id) {
+      ...CardFields
+    }
+  }
+  ${CARD_FIELDS}
+`;
+
 export const UPDATE_CARD: Doc<
   { updateCard: Card },
   { input: { recipe?: string | null; shared?: boolean } }
@@ -484,6 +606,67 @@ export const UPDATE_CARD: Doc<
 export const START_DIRECT: Doc<{ startDirect: Conversation }, { username: string }> = gql`
   mutation StartDirect($username: String!) {
     startDirect(username: $username) {
+      ...ConversationFields
+    }
+  }
+  ${CONVERSATION_FIELDS}
+`;
+
+export const RESPOND_TO_REQUEST: Doc<
+  { respondToRequest: Conversation | null },
+  { conversationId: string; accept: boolean }
+> = gql`
+  mutation RespondToRequest($conversationId: ID!, $accept: Boolean!) {
+    respondToRequest(conversationId: $conversationId, accept: $accept) {
+      ...ConversationFields
+    }
+  }
+  ${CONVERSATION_FIELDS}
+`;
+
+export const GROUP_INVITE_FIELDS = gql`
+  fragment GroupInviteFields on GroupInvite {
+    id
+    conversationId
+    name
+    createdAt
+    invitedBy {
+      ...UserFields
+    }
+    members {
+      ...UserFields
+    }
+  }
+  ${USER_FIELDS}
+`;
+
+export const INVITES: Doc<{ invites: GroupInvite[] }> = gql`
+  query Invites {
+    invites {
+      ...GroupInviteFields
+    }
+  }
+  ${GROUP_INVITE_FIELDS}
+`;
+
+export const RESPOND_TO_INVITE: Doc<
+  { respondToInvite: Conversation | null },
+  { conversationId: string; accept: boolean }
+> = gql`
+  mutation RespondToInvite($conversationId: ID!, $accept: Boolean!) {
+    respondToInvite(conversationId: $conversationId, accept: $accept) {
+      ...ConversationFields
+    }
+  }
+  ${CONVERSATION_FIELDS}
+`;
+
+export const CANCEL_INVITE: Doc<
+  { cancelInvite: Conversation },
+  { conversationId: string; userId: string }
+> = gql`
+  mutation CancelInvite($conversationId: ID!, $userId: ID!) {
+    cancelInvite(conversationId: $conversationId, userId: $userId) {
       ...ConversationFields
     }
   }
@@ -760,6 +943,21 @@ export const EVENTS: Doc<{ events: ChatEvent }> = gql`
           }
         }
       }
+      ... on InviteChanged {
+        conversationId
+        invite {
+          ...GroupInviteFields
+        }
+      }
+      ... on RequestAnswered {
+        conversationId
+        kind
+        groupName
+        accepted
+        user {
+          ...UserFields
+        }
+      }
       ... on MediaRequested {
         requestId
         conversationId
@@ -779,4 +977,5 @@ export const EVENTS: Doc<{ events: ChatEvent }> = gql`
     }
   }
   ${CONVERSATION_FIELDS}
+  ${GROUP_INVITE_FIELDS}
 `;

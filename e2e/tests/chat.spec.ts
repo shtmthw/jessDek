@@ -1,31 +1,35 @@
 import { expect, test } from '@playwright/test';
-import { createGroup, newUser, send, startDirect, unique } from './helpers';
+import { createGroup, newUser, openDirect, send, startDirect, unique } from './helpers';
 
 test('two people chat in realtime without reloading', async ({ browser }) => {
   const a = await newUser(browser, unique('alice'));
   const b = await newUser(browser, unique('bob'));
 
-  // Alice starts a chat with Bob and says hello.
-  await startDirect(a.page, b.username);
+  // Alice starts a chat with Bob and says hello. For Bob a first message is a request.
+  await openDirect(a.page, b.username);
   await send(a.page, 'hello from alice');
   await expect(
     a.page.getByRole('log', { name: 'Messages' }).getByText('hello from alice'),
   ).toBeVisible();
 
-  // Bob never reloaded: the new chat, preview and unread badge simply appear.
-  const bobsChat = b.page
-    .getByRole('navigation', { name: 'Conversations' })
-    .getByRole('link', { name: /alice/i });
-  await expect(bobsChat).toBeVisible();
-  await expect(bobsChat).toContainText('hello from alice');
-  await expect(bobsChat.getByLabel('1 unread')).toBeVisible();
+  // Bob never reloaded: the request simply appears, quietly. It isn't a chat of his yet.
+  const bobsChats = b.page.getByRole('navigation', { name: 'Conversations' });
+  const requests = bobsChats.getByRole('link', { name: 'Requests, 1 waiting' });
+  await expect(requests).toBeVisible();
+  await expect(bobsChats.getByRole('link', { name: /alice/i })).toHaveCount(0);
 
-  // Opening it shows the message and clears the badge.
-  await bobsChat.click();
+  // Opening it shows the message, and accepting turns it into a chat in his list.
+  await requests.click();
+  await b.page.getByRole('link', { name: new RegExp(`@${a.username}`) }).click();
   await expect(
     b.page.getByRole('log', { name: 'Messages' }).getByText('hello from alice'),
   ).toBeVisible();
-  await expect(bobsChat.getByLabel(/unread/)).toHaveCount(0);
+  await b.page.getByRole('button', { name: 'Accept' }).click();
+  const bobsChat = bobsChats.getByRole('link', { name: /alice/i });
+  await expect(bobsChat).toBeVisible();
+  await expect(bobsChat).toContainText('hello from alice');
+  await expect(requests).toHaveCount(0);
+  await expect(bobsChat.getByLabel(/unread/)).toHaveCount(0); // he's reading it
 
   // Bob replies and Alice sees it instantly, in the chat she already has open.
   await send(b.page, 'hi alice!');
@@ -52,24 +56,8 @@ test('group chats reach everyone and show unread counts', async ({ browser }) =>
   const b = await newUser(browser, unique('bob'));
   const c = await newUser(browser, unique('carol'));
 
-  await a.page.getByRole('button', { name: 'New chat' }).first().click();
-  await a.page.getByRole('tab', { name: 'Group' }).click();
-  await a.page.getByLabel('Group name').fill('Weekend plans');
-  for (const u of [b, c]) {
-    await a.page.getByLabel('Search people by username').fill(u.username.slice(0, 6));
-    await a.page.getByRole('button', { name: new RegExp(`@${u.username}`) }).click();
-  }
-  await a.page.getByRole('button', { name: /Create group with 2 people/ }).click();
-  await expect(a.page.getByRole('heading', { name: 'Weekend plans' })).toBeVisible();
-
-  // The others are added live.
-  for (const u of [b, c]) {
-    await expect(
-      u.page
-        .getByRole('navigation', { name: 'Conversations' })
-        .getByRole('link', { name: /Weekend plans/ }),
-    ).toBeVisible();
-  }
+  // The others are invited, and join from Requests.
+  await createGroup(a, 'Weekend plans', [b, c]);
 
   await send(a.page, 'who is in?');
   const carolsRow = c.page
@@ -97,7 +85,7 @@ test('history survives a reload and pages in earlier messages', async ({ browser
   test.slow();
   const a = await newUser(browser, unique('alice'));
   const b = await newUser(browser, unique('bob'));
-  await startDirect(a.page, b.username);
+  await startDirect(a, b);
   for (let i = 1; i <= 40; i++) {
     await send(a.page, `message ${i}`);
     if (i % 25 === 0) await a.page.waitForTimeout(10_500); // stay under the 30 messages / 10s limit
@@ -126,7 +114,7 @@ for (const [label, viewport] of [
     const a = await newUser(browser, unique('alice'), viewport);
     const b = await newUser(browser, unique('bob'), viewport);
     const c = await newUser(browser, unique('carol'), viewport);
-    await createGroup(a.page, 'Typing club', [b.username, c.username]);
+    await createGroup(a, 'Typing club', [b, c]);
     for (const u of [b, c]) {
       await u.page
         .getByRole('navigation', { name: 'Conversations' })

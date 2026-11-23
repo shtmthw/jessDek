@@ -1,6 +1,7 @@
 import { useMutation, useQuery } from '@apollo/client';
 import { useCallback } from 'react';
 import { CARD, UPDATE_CARD } from '@/lib/gql';
+import { markDeckStale } from '../discover/DeckProvider';
 import { useViewer } from '../session/ViewerProvider';
 
 /** Your own card as the server has it, and a way to save it. */
@@ -26,6 +27,8 @@ export function useMyCard() {
   const save = useCallback(
     async (input: SaveCardInput) => {
       await update({ variables: { input } });
+      // New interests can mean different matches: deal a new deck next time.
+      if ('recipe' in input) markDeckStale();
     },
     [update],
   );

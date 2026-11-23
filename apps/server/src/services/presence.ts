@@ -9,10 +9,16 @@ const connections = new Map<string, number>();
 
 export const isOnline = (userId: string) => (connections.get(userId) ?? 0) > 0;
 
-/** Everyone who shares at least one conversation with `userId`. */
+/**
+ * Everyone who shares at least one conversation with `userId`. A message request doesn't count:
+ * strangers never see each other come and go, or each other's profile changes, until it's accepted.
+ */
 export async function peersOf(userId: string): Promise<string[]> {
   const rows = await prisma.conversationMember.findMany({
-    where: { userId: { not: userId }, conversation: { members: { some: { userId } } } },
+    where: {
+      userId: { not: userId },
+      conversation: { requestState: null, members: { some: { userId } } },
+    },
     select: { userId: true },
     distinct: ['userId'],
   });

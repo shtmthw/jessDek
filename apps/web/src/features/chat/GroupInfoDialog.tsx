@@ -10,6 +10,7 @@ import {
   ShieldCheck,
   UserMinus,
   UserPlus,
+  X,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useState } from 'react';
@@ -25,6 +26,7 @@ import { removeConversation } from '@/lib/cacheUpdates';
 import {
   ADD_MEMBERS,
   BLOCKED_USERS,
+  CANCEL_INVITE,
   LEAVE_GROUP,
   RENAME_GROUP,
   type Conversation,
@@ -70,6 +72,7 @@ export function GroupInfoDialog({
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [renameGroup, rename] = useMutation(RENAME_GROUP);
   const [addMembers] = useMutation(ADD_MEMBERS);
+  const [cancelInvite] = useMutation(CANCEL_INVITE);
   const [leaveGroup, leave] = useMutation(LEAVE_GROUP);
   const actions = useChatActions();
   const { data: blockedData } = useQuery(BLOCKED_USERS, {
@@ -110,12 +113,28 @@ export function GroupInfoDialog({
       await addMembers({
         variables: { conversationId: conversation.id, usernames: [user.username] },
       });
-      toast.success(`${user.displayName} added`);
+      toast.success(`Invited ${user.displayName}`, {
+        description: 'They join if they accept.',
+      });
       setAdding(false);
     } catch (err) {
       toast.error(messageOf(err));
     }
   }
+
+  async function cancel(user: Pick<User, 'id' | 'displayName'>) {
+    try {
+      await cancelInvite({ variables: { conversationId: conversation.id, userId: user.id } });
+      toast.success(`Invite to ${user.displayName} taken back`);
+    } catch (err) {
+      toast.error(messageOf(err));
+    }
+  }
+
+  // Still deciding first (oldest first), then the ones who said no.
+  const invites = [...conversation.invites].sort(
+    (a, b) => Number(a.state === 'DECLINED') - Number(b.state === 'DECLINED'),
+  );
 
   async function doLeave() {
     try {
@@ -283,22 +302,82 @@ export function GroupInfoDialog({
         </AnimatePresence>
       </ul>
 
+      {invites.length ? (
+        <>
+          <h3 className="mb-1.5 text-sm font-semibold">Invited</h3>
+          <ul className="-mx-1 mb-4 space-y-0.5">
+            <AnimatePresence initial={false}>
+              {invites.map((i) => {
+                const declined = i.state === 'DECLINED';
+                const canCancel = !declined && (isOwner || i.invitedBy.id === viewer.id);
+                return (
+                  <motion.li
+                    key={i.user.id}
+                    layout="position"
+                    className="flex min-h-12 items-center gap-3 rounded-xl px-1 py-1.5"
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, transition: exit.fast }}
+                    transition={spring.soft}
+                  >
+                    <span className={declined ? 'opacity-50 grayscale' : 'opacity-70'}>
+                      <Avatar
+                        name={i.user.displayName}
+                        color={i.user.avatarColor}
+                        avatar={i.user.avatar}
+                      />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold">
+                        <span className={declined ? 'text-muted-foreground' : undefined}>
+                          {i.user.displayName}
+                        </span>
+                      </p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {declined
+                          ? 'Declined the invite'
+                          : `Invited by ${i.invitedBy.id === viewer.id ? 'you' : i.invitedBy.displayName.split(' ')[0]} · waiting`}
+                      </p>
+                    </div>
+                    {canCancel ? (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="-mr-1"
+                        aria-label={`Take back the invite to ${i.user.displayName}`}
+                        title="Take back the invite"
+                        onClick={() => void cancel(i.user)}
+                      >
+                        <X className="size-[18px]" />
+                      </Button>
+                    ) : null}
+                  </motion.li>
+                );
+              })}
+            </AnimatePresence>
+          </ul>
+        </>
+      ) : null}
+
       <div className="mb-4">
         <AnimatePresence initial={false} mode="popLayout">
           {adding ? (
             <motion.div key="picker" {...swap}>
-              <h3 className="mb-2 text-sm font-semibold">Add someone</h3>
+              <h3 className="mb-2 text-sm font-semibold">Invite someone</h3>
               <UserPicker
                 autoFocus
                 selected={[]}
-                excludeIds={conversation.members.map((m) => m.id)}
+                excludeIds={[
+                  ...conversation.members.map((m) => m.id),
+                  ...conversation.invites.map((i) => i.user.id),
+                ]}
                 onPick={(u) => void add(u)}
               />
             </motion.div>
           ) : (
             <motion.div key="add" {...swap}>
               <Button variant="secondary" className="w-full" onClick={() => setAdding(true)}>
-                <UserPlus className="size-4" /> Add people
+                <UserPlus className="size-4" /> Invite people
               </Button>
             </motion.div>
           )}

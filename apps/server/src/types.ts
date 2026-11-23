@@ -13,6 +13,17 @@ export type MessageWithSender = Prisma.MessageGetPayload<{ include: typeof messa
 export type ServerEvent =
   | { __typename: 'MessageAdded'; conversationId: string; message: MessageWithSender }
   | { __typename: 'ConversationUpdated'; conversationId: string }
+  /** To an invitee: their invite to this group changed (resolved per subscriber). */
+  | { __typename: 'InviteChanged'; conversationId: string }
+  /** To whoever sent a message request or group invite: `user` answered it. */
+  | {
+      __typename: 'RequestAnswered';
+      conversationId: string;
+      kind: 'DIRECT' | 'GROUP';
+      groupName: string | null;
+      user: User;
+      accepted: boolean;
+    }
   | { __typename: 'TypingStarted'; conversationId: string; user: User }
   | { __typename: 'UserUpdated'; user: User }
   | { __typename: 'ReactionChanged'; conversationId: string; message: MessageWithSender }

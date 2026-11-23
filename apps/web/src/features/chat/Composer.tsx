@@ -37,6 +37,7 @@ export function Composer({
   viewerId,
   onCancelReply,
   onWallpaper,
+  textOnly,
 }: {
   /** `items` are the photos and videos from the tray (ownership passes to the caller). */
   onSend: (body: string, items?: TrayItem[]) => void;
@@ -52,6 +53,8 @@ export function Composer({
   onCancelReply?: () => void;
   /** The chat has a wallpaper: let it show around the message box. */
   onWallpaper?: boolean;
+  /** No photos or videos (a message request): no attach button, pasted files are ignored. */
+  textOnly?: boolean;
 }) {
   const [value, setValue] = useState(() => (draftKey ? getDraft(draftKey) : ''));
   const [launches, setLaunches] = useState(0);
@@ -62,7 +65,7 @@ export function Composer({
   const trayKey = draftKey ?? fallbackKey;
   const items = useTray(trayKey);
   const hd = useHd(trayKey);
-  const mediaEnabled = useMediaConfig()?.enabled !== false;
+  const mediaEnabled = useMediaConfig()?.enabled !== false && !textOnly;
   const [introSeen] = usePref('media:intro-seen');
   const hasMedia = items.length > 0;
   const canSend = value.trim().length > 0 || hasMedia;

@@ -4,7 +4,16 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { isStaticFileRequest, withCardMeta } from '../src/app.js';
 import { config } from '../src/config.js';
 import { prisma } from '../src/db.js';
-import { Client, newApp, resetDb, signUp } from './helpers.js';
+import { sendLimiter } from '../src/services/messages.js';
+import {
+  Client,
+  RESPOND_TO_INVITE,
+  connect,
+  groupWith,
+  newApp,
+  resetDb,
+  signUp,
+} from './helpers.js';
 
 let app: FastifyInstance;
 beforeAll(async () => {
@@ -217,11 +226,11 @@ describe('direct messages', () => {
   });
 
   it('lists conversations newest-activity first with last message', async () => {
-    const { a } = await twoUsers();
+    const { a, b } = await twoUsers();
     const c = new Client(app);
     await signUp(c, 'carol');
-    const dmBob = (await a.gql(START_DIRECT, { u: 'bob' })).data!.startDirect;
-    const dmCarol = (await a.gql(START_DIRECT, { u: 'carol' })).data!.startDirect;
+    const dmBob = await connect(a, b);
+    const dmCarol = await connect(a, c);
     await a.gql(SEND, { c: dmBob.id, b: 'hello bob' });
     await a.gql(SEND, { c: dmCarol.id, b: 'hello carol' });
     await a.gql(SEND, { c: dmBob.id, b: 'again bob' });
@@ -236,8 +245,8 @@ describe('direct messages', () => {
 
 describe('messages', () => {
   it('sends, validates and trims', async () => {
-    const { a } = await twoUsers();
-    const dm = (await a.gql(START_DIRECT, { u: 'bob' })).data!.startDirect;
+    const { a, b } = await twoUsers();
+    const dm = await connect(a, b);
 
     const sent = await a.gql(SEND, { c: dm.id, b: '  hi there  ' });
     expect(sent.data!.sendMessage).toMatchObject({
@@ -255,9 +264,9 @@ describe('messages', () => {
   });
 
   it('pages history oldest → newest with a cursor', async () => {
-    const { a } = await twoUsers();
-    const dm = (await a.gql(START_DIRECT, { u: 'bob' })).data!.startDirect;
-    for (let i = 1; i <= 7; i++) await a.gql(SEND, { c: dm.id, b: `m${i}` });
+    const { a, b } = await twoUsers();
+    const dm = await connect(a, b, 'm1'); // the request's message is the first of the history
+    for (let i = 2; i <= 7; i++) await a.gql(SEND, { c: dm.id, b: `m${i}` });
 
     const latest = (await a.gql(MESSAGES, { c: dm.id, limit: 3 })).data!.messages;
     expect(latest.messages.map((m: any) => m.body)).toEqual(['m5', 'm6', 'm7']);
@@ -275,11 +284,10 @@ describe('messages', () => {
   });
 
   it('keeps conversations private to their members', async () => {
-    const { a } = await twoUsers();
+    const { a, b } = await twoUsers();
     const eve = new Client(app);
     await signUp(eve, 'eve');
-    const dm = (await a.gql(START_DIRECT, { u: 'bob' })).data!.startDirect;
-    await a.gql(SEND, { c: dm.id, b: 'secret' });
+    const dm = await connect(a, b, 'secret');
 
     for (const res of [
       await eve.gql(MESSAGES, { c: dm.id }),
@@ -299,8 +307,7 @@ describe('messages', () => {
 
   it('counts unread messages and clears them with markRead', async () => {
     const { a, b } = await twoUsers();
-    const dm = (await a.gql(START_DIRECT, { u: 'bob' })).data!.startDirect;
-    await a.gql(SEND, { c: dm.id, b: 'one' });
+    const dm = await connect(a, b, 'one');
     await a.gql(SEND, { c: dm.id, b: 'two' });
 
     const unread = async (c: Client) =>
@@ -319,8 +326,9 @@ describe('messages', () => {
   });
 
   it('rate limits message flooding', async () => {
-    const { a } = await twoUsers();
-    const dm = (await a.gql(START_DIRECT, { u: 'bob' })).data!.startDirect;
+    const { a, b } = await twoUsers();
+    const dm = await connect(a, b);
+    sendLimiter.clear(); // connecting sent one message: count from a clean slate
     let limited = 0;
     for (let i = 0; i < 35; i++) {
       const r = await a.gql(SEND, { c: dm.id, b: `spam ${i}` });
@@ -331,9 +339,9 @@ describe('messages', () => {
 });
 
 describe('groups', () => {
-  const CREATE = `mutation($n: String!, $u: [String!]!) { createGroup(name: $n, usernames: $u) { id type title name unreadCount members { username } } }`;
+  const CREATE = `mutation($n: String!, $u: [String!]!) { createGroup(name: $n, usernames: $u) { id type title name unreadCount members { username } invites { state user { username } } } }`;
 
-  it('creates a group, adds members and lets people leave', async () => {
+  it('creates a group, invites members and lets people leave', async () => {
     const { a, b } = await twoUsers();
     const c = new Client(app);
     await signUp(c, 'carol');
@@ -341,25 +349,37 @@ describe('groups', () => {
     const g = (await a.gql(CREATE, { n: '  Hike  ', u: ['bob', 'bob', '@carol', 'alice'] })).data!
       .createGroup;
     expect(g).toMatchObject({ type: 'GROUP', title: 'Hike' });
-    expect(g.members.map((m: any) => m.username).sort()).toEqual(['alice', 'bob', 'carol']);
+    // Only the creator is in at first. Everyone else is invited, once, and joins if they want to.
+    expect(g.members.map((m: any) => m.username)).toEqual(['alice']);
+    expect(g.invites.map((i: any) => [i.user.username, i.state]).sort()).toEqual([
+      ['bob', 'PENDING'],
+      ['carol', 'PENDING'],
+    ]);
+    expect((await c.gql(SEND, { c: g.id, b: 'too early' })).errors![0]!.extensions!.code).toBe(
+      'NOT_FOUND',
+    );
+    for (const who of [b, c]) await who.gql(RESPOND_TO_INVITE, { c: g.id, accept: true });
 
     // everyone in the group can talk
     await c.gql(SEND, { c: g.id, b: 'hi group' });
     expect((await b.gql(MESSAGES, { c: g.id })).data!.messages.messages).toHaveLength(1);
 
-    // add a new person; adding existing members is a conflict
+    // invite a new person; people already in the group, or already invited, are a conflict
     const d = new Client(app);
     await signUp(d, 'dave');
     const added = await b.gql(
-      `mutation($c: ID!, $u: [String!]!) { addMembers(conversationId: $c, usernames: $u) { members { username } } }`,
+      `mutation($c: ID!, $u: [String!]!) { addMembers(conversationId: $c, usernames: $u) { members { username } invites { user { username } } } }`,
       { c: g.id, u: ['dave'] },
     );
-    expect(added.data!.addMembers.members).toHaveLength(4);
+    expect(added.data!.addMembers.members).toHaveLength(3);
+    expect(added.data!.addMembers.invites).toEqual([{ user: { username: 'dave' } }]);
     const again = await b.gql(
       `mutation($c: ID!, $u: [String!]!) { addMembers(conversationId: $c, usernames: $u) { id } }`,
       { c: g.id, u: ['dave', 'carol'] },
     );
     expect(again.errors![0]!.extensions!.code).toBe('CONFLICT');
+    expect((await d.gql(MESSAGES, { c: g.id })).errors![0]!.extensions!.code).toBe('NOT_FOUND');
+    await d.gql(RESPOND_TO_INVITE, { c: g.id, accept: true });
     expect((await d.gql(MESSAGES, { c: g.id })).errors).toBeUndefined();
 
     // leaving removes access; the owner role moves on
@@ -374,14 +394,15 @@ describe('groups', () => {
 
   it('deletes a group once everyone has left', async () => {
     const { a, b } = await twoUsers();
-    const g = (await a.gql(CREATE, { n: 'Temp', u: ['bob'] })).data!.createGroup;
+    const g = await groupWith(a, 'Temp', [b]);
     await a.gql(`mutation($c: ID!) { leaveGroup(conversationId: $c) }`, { c: g.id });
+    expect(await prisma.conversation.count()).toBe(1);
     await b.gql(`mutation($c: ID!) { leaveGroup(conversationId: $c) }`, { c: g.id });
     expect(await prisma.conversation.count()).toBe(0);
   });
 
   it('validates names and members, and keeps DMs out of group operations', async () => {
-    const { a } = await twoUsers();
+    const { a, b } = await twoUsers();
     expect((await a.gql(CREATE, { n: '   ', u: ['bob'] })).errors![0]!.extensions).toMatchObject({
       code: 'BAD_USER_INPUT',
       field: 'name',
@@ -396,7 +417,7 @@ describe('groups', () => {
       'BAD_USER_INPUT',
     );
 
-    const dm = (await a.gql(START_DIRECT, { u: 'bob' })).data!.startDirect;
+    const dm = await connect(a, b);
     const leave = await a.gql(`mutation($c: ID!) { leaveGroup(conversationId: $c) }`, { c: dm.id });
     expect(leave.errors![0]!.extensions!.code).toBe('BAD_USER_INPUT');
   });
@@ -598,7 +619,7 @@ const SEND_MEDIA = `mutation($c: ID!, $b: String!, $a: [AttachmentInput!]) { sen
 describe('media metadata', () => {
   async function dm() {
     const { a, b } = await twoUsers();
-    const conv = (await a.gql(START_DIRECT, { u: 'bob' })).data!.startDirect;
+    const conv = await connect(a, b);
     return { a, b, conv };
   }
 
@@ -628,7 +649,8 @@ describe('media metadata', () => {
       `query($c: ID!) { messages(conversationId: $c) { messages { id attachments { id sha256 } } } }`,
       { c: conv.id },
     );
-    expect(page.data!.messages.messages[0].attachments[0].sha256).toBe(SHA);
+    // (The chat starts with the message that opened the request.)
+    expect(page.data!.messages.messages.at(-1).attachments[0].sha256).toBe(SHA);
     const list = await b.gql(`{ conversations { lastMessage { attachments { id kind } } } }`);
     expect(list.data!.conversations[0].lastMessage.attachments).toEqual([
       { id: msg.attachments[0].id, kind: 'IMAGE' },
@@ -749,7 +771,7 @@ describe('blocking, muting and removing', () => {
     const { a, b } = await twoUsers();
     const c = new Client(app);
     await signUp(c, 'carol', { displayName: 'Carol C' });
-    const dm = (await a.gql(START_DIRECT, { u: 'bob' })).data!.startDirect;
+    const dm = await connect(a, b);
     const ids = Object.fromEntries(
       (await prisma.user.findMany()).map((u) => [u.username, u.id]),
     ) as Record<string, string>;
@@ -786,9 +808,7 @@ describe('blocking, muting and removing', () => {
 
   it('someone who blocked you can’t be reached by a new chat or a group, but shared groups still work', async () => {
     const { a, b, c, ids } = await three();
-    const group = (
-      await a.gql(`mutation { createGroup(name: "Trip", usernames: ["bob", "carol"]) { id } }`)
-    ).data!.createGroup;
+    const group = await groupWith(a, 'Trip', [b, c]);
     await c.gql(`mutation($u: ID!) { blockUser(userId: $u) { id } }`, { u: ids.alice });
 
     expect(code(await a.gql(START_DIRECT, { u: 'carol' }))).toBe('FORBIDDEN');
@@ -848,9 +868,7 @@ describe('blocking, muting and removing', () => {
 
   it('lets only the owner remove someone from a group', async () => {
     const { a, b, c, ids } = await three();
-    const group = (
-      await a.gql(`mutation { createGroup(name: "Trip", usernames: ["bob", "carol"]) { id } }`)
-    ).data!.createGroup;
+    const group = await groupWith(a, 'Trip', [b, c]);
     await c.gql(SEND_TEXT, { c: group.id, b: 'hello' });
     expect((await b.gql(`{ conversations { ownerId } }`)).data!.conversations[0].ownerId).toBe(
       ids.alice,
@@ -891,9 +909,7 @@ describe('replies and reactions', () => {
     await signUp(a, 'alice');
     await signUp(b, 'bob');
     await signUp(c, 'carol');
-    const g = (
-      await a.gql(`mutation { createGroup(name: "Trip", usernames: ["bob", "carol"]) { id } }`)
-    ).data!.createGroup as { id: string };
+    const g = await groupWith(a, 'Trip', [b, c]);
     const fromAlice = (await a.gql(SEND, { c: g.id, b: 'leaving at 7' })).data!.sendMessage;
     const fromBob = (await b.gql(SEND, { c: g.id, b: 'see you there' })).data!.sendMessage;
     return { a, b, c, g, fromAlice, fromBob };
@@ -923,8 +939,8 @@ describe('replies and reactions', () => {
 
   it('refuses a reply to a message from another chat', async () => {
     const { a, g } = await group();
-    const { a: other } = await twoUsersIn('dora', 'eli');
-    const dm = (await other.gql(START_DIRECT, { u: 'eli' })).data!.startDirect;
+    const { a: other, b: eli } = await twoUsersIn('dora', 'eli');
+    const dm = await connect(other, eli);
     const elsewhere = (await other.gql(SEND, { c: dm.id, b: 'private' })).data!.sendMessage;
     const res = await a.gql(SEND_REPLY, { c: g.id, b: 'hi', r: elsewhere.id });
     expect(res.errors![0]!.extensions!.code).toBe('BAD_USER_INPUT');
@@ -981,7 +997,7 @@ describe('replies and reactions', () => {
     expect(res.errors![0]!.extensions!.code).toBe('NOT_FOUND');
 
     const { a, b } = await twoUsersIn('fay', 'gus');
-    const conv = (await a.gql(START_DIRECT, { u: 'gus' })).data!.startDirect;
+    const conv = await connect(a, b);
     const msg = (await a.gql(SEND, { c: conv.id, b: 'hi gus' })).data!.sendMessage;
     const gus = (await b.gql(`{ me { id } }`)).data!.me.id;
     await a.gql(`mutation($u: ID!) { blockUser(userId: $u) { id } }`, { u: gus });
@@ -1023,9 +1039,7 @@ describe('replies and reactions', () => {
   it('never counts as unread or reorders the chat list', async () => {
     const { a, b, g, fromBob } = await group();
     // A second chat for alice, newer than the group.
-    await b.gql(START_DIRECT, { u: 'alice' }).then(async (r) => {
-      await b.gql(SEND, { c: r.data!.startDirect.id, b: 'newer' });
-    });
+    await connect(b, a, 'newer');
     await a.gql(`mutation($c: ID!) { markRead(conversationId: $c) { id } }`, { c: g.id });
     const before = (await a.gql(LIST)).data!.conversations;
     await b.gql(REACT, { m: fromBob.id, e: '❤️' }); // bob on his own message
@@ -1186,7 +1200,7 @@ describe('chat themes', () => {
 
   it('sets a theme everyone in the chat sees, remembers who changed it, and resets with null', async () => {
     const { a, b } = await twoUsers();
-    const dm = (await a.gql(START_DIRECT, { u: 'bob' })).data!.startDirect;
+    const dm = await connect(a, b);
     const before = (await b.gql(CONVO, { c: dm.id })).data!.conversation;
     expect(before.theme).toBeNull();
     expect(before.themeSetBy).toBeNull();
@@ -1222,7 +1236,7 @@ describe('chat themes', () => {
 
   it('setting the theme a chat already has changes nothing', async () => {
     const { a, b } = await twoUsers();
-    const dm = (await a.gql(START_DIRECT, { u: 'bob' })).data!.startDirect;
+    const dm = await connect(a, b);
     const first = (await a.gql(SET, { c: dm.id, t: theme({ preset: 'ocean' }) })).data!
       .setChatTheme;
     const again = (await b.gql(SET, { c: dm.id, t: theme({ preset: 'ocean' }) })).data!
@@ -1232,8 +1246,8 @@ describe('chat themes', () => {
   });
 
   it('checks the recipe’s shape and size', async () => {
-    const { a } = await twoUsers();
-    const dm = (await a.gql(START_DIRECT, { u: 'bob' })).data!.startDirect;
+    const { a, b } = await twoUsers();
+    const dm = await connect(a, b);
     const bad = [
       'not json',
       '[1,2]',
@@ -1261,7 +1275,7 @@ describe('chat themes', () => {
     const { a, b } = await twoUsers();
     const eve = new Client(app);
     await signUp(eve, 'eve');
-    const dm = (await a.gql(START_DIRECT, { u: 'bob' })).data!.startDirect;
+    const dm = await connect(a, b);
     const r = await eve.gql(SET, { c: dm.id, t: theme({ preset: 'blush' }) });
     expect(code(r)).toBe('NOT_FOUND');
 
@@ -1278,8 +1292,7 @@ describe('chat themes', () => {
     const { a, b } = await twoUsers();
     const bobId = (await a.gql(`query { searchUsers(query: "bob") { id } }`)).data!.searchUsers[0]
       .id;
-    const g = (await a.gql(`mutation { createGroup(name: "Trip", usernames: ["bob"]) { id } }`))
-      .data!.createGroup;
+    const g = await groupWith(a, 'Trip', [b]);
     const picked = await b.gql(COLOR, { c: g.id, k: 'orange' });
     expect(picked.errors).toBeUndefined();
     expect(picked.data!.setMemberColor.memberColors).toEqual([{ userId: bobId, color: 'orange' }]);
@@ -1290,14 +1303,14 @@ describe('chat themes', () => {
     expect(auto.data!.setMemberColor.memberColors).toEqual([]);
 
     expect(code(await b.gql(COLOR, { c: g.id, k: 'Orange!' }))).toBe('BAD_USER_INPUT');
-    const dm = (await a.gql(START_DIRECT, { u: 'bob' })).data!.startDirect;
+    const dm = await connect(a, b);
     expect(code(await a.gql(COLOR, { c: dm.id, k: 'sky' }))).toBe('BAD_USER_INPUT');
     expect((await a.gql(CONVO, { c: dm.id })).data!.conversation.memberColors).toEqual([]);
   });
 
   it('is rate limited', async () => {
-    const { a } = await twoUsers();
-    const dm = (await a.gql(START_DIRECT, { u: 'bob' })).data!.startDirect;
+    const { a, b } = await twoUsers();
+    const dm = await connect(a, b);
     const presets = ['ocean', 'blush'];
     for (let i = 0; i < 30; i++) {
       const r = await a.gql(SET, { c: dm.id, t: theme({ preset: presets[i % 2] }) });

@@ -6,7 +6,7 @@ import { publishToUsers } from '../pubsub.js';
 import { RateLimiter } from '../rateLimit.js';
 import { messageInclude, type MessageWithSender } from '../types.js';
 import { blockedBetween, withoutBlocked } from './blocks.js';
-import { memberIds, notifyConversation, requireMember } from './conversations.js';
+import { memberIds, notifyConversation, requireMember, requestLimiter } from './conversations.js';
 
 const captionSchema = z
   .string({ required_error: 'Write a message first' })
@@ -142,12 +142,44 @@ export async function sendMessage(
   await requireMember(userId, conversationId);
   const conversation = await prisma.conversation.findUniqueOrThrow({
     where: { id: conversationId },
-    select: { type: true, members: { select: { userId: true, hiddenAt: true } } },
+    select: {
+      type: true,
+      requestState: true,
+      requestedById: true,
+      requestSentAt: true,
+      members: {
+        select: { userId: true, hiddenAt: true, user: { select: { displayName: true } } },
+      },
+    },
   });
+  const other = conversation.members.find((m) => m.userId !== userId);
   if (conversation.type === 'DIRECT') {
-    const other = conversation.members.find((m) => m.userId !== userId);
     if (!other || (await blockedBetween(userId, other.userId)))
       throw fail('FORBIDDEN', 'You can’t message this person');
+  }
+  // A message request: the person who started it sends one message, text only, then waits.
+  const request = conversation.requestState !== null;
+  if (request) {
+    const name = other?.user.displayName.split(' ')[0] ?? 'They';
+    if (conversation.requestState === 'DECLINED')
+      throw fail(
+        'FORBIDDEN',
+        conversation.requestedById === userId
+          ? `${name} declined your message request`
+          : 'You declined this message request',
+      );
+    if (conversation.requestedById !== userId)
+      throw fail('FORBIDDEN', 'Accept the request to reply');
+    if (conversation.requestSentAt)
+      throw fail('FORBIDDEN', `You can send one message until ${name} accepts`);
+    if (list.length)
+      throw fail('BAD_USER_INPUT', `Photos and videos can wait until ${name} accepts`, {
+        field: 'attachments',
+      });
+    if (replyToId) throw fail('BAD_USER_INPUT', 'Message requests can’t be replies');
+    if (!text) throw fail('BAD_USER_INPUT', 'Write a message first');
+    if (!requestLimiter.allow(userId))
+      throw fail('RATE_LIMITED', 'You’ve reached out to a lot of people. Try again later');
   }
   if (replyToId) {
     const original = await prisma.message.findUnique({
@@ -163,8 +195,22 @@ export async function sendMessage(
   sendLimiter.hit(userId);
 
   const now = new Date();
-  const [message] = await prisma.$transaction([
-    prisma.message.create({
+  const message = await prisma.$transaction(async (tx) => {
+    if (request) {
+      // The one-message rule, atomically: of two sends racing (two tabs, a double tap), only the
+      // one that marks the request as sent gets through.
+      const claimed = await tx.conversation.updateMany({
+        where: {
+          id: conversationId,
+          requestState: 'PENDING',
+          requestedById: userId,
+          requestSentAt: null,
+        },
+        data: { requestSentAt: now },
+      });
+      if (claimed.count === 0) throw fail('FORBIDDEN', 'You’ve already sent your request');
+    }
+    const created = await tx.message.create({
       data: {
         conversationId,
         senderId: userId,
@@ -174,20 +220,28 @@ export async function sendMessage(
         attachments: { create: list.map(toRow) },
       },
       include: messageInclude,
-    }),
-    prisma.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: now } }),
-    prisma.conversationMember.update({
+    });
+    await tx.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: now } });
+    await tx.conversationMember.update({
       where: { conversationId_userId: { conversationId, userId } },
       data: { lastReadAt: now },
-    }),
+    });
     // Something new: anyone who had removed this chat from their list gets it back.
-    prisma.conversationMember.updateMany({
+    await tx.conversationMember.updateMany({
       where: { conversationId, hiddenAt: { not: null } },
       data: { hiddenAt: null },
-    }),
-  ]);
+    });
+    return created;
+  });
+  if (request) requestLimiter.hit(userId);
   const unhidden = conversation.members.filter((m) => m.hiddenAt).map((m) => m.userId);
-  if (unhidden.length) notifyConversation(unhidden, conversationId);
+  // The request just reached its recipient: their list learns about the chat before the message,
+  // and the sender's tabs learn it's sent (their composer locks).
+  const told = new Set([
+    ...unhidden,
+    ...(request ? [userId, ...(other ? [other.userId] : [])] : []),
+  ]);
+  if (told.size) notifyConversation(told, conversationId);
 
   publishToUsers(await memberIds(conversationId), {
     __typename: 'MessageAdded',
@@ -199,6 +253,12 @@ export async function sendMessage(
 
 export async function setTyping(userId: string, conversationId: string): Promise<boolean> {
   await requireMember(userId, conversationId);
+  // Nobody sees typing in a message request (it would reach the recipient before the request).
+  const { requestState } = await prisma.conversation.findUniqueOrThrow({
+    where: { id: conversationId },
+    select: { requestState: true },
+  });
+  if (requestState) return false;
   if (!typingLimiter.allow(userId)) return false;
   typingLimiter.hit(userId);
   const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });

@@ -1,8 +1,16 @@
-import { Prisma, type Conversation, type ConversationMember, type User } from '@prisma/client';
+import {
+  Prisma,
+  type Conversation,
+  type ConversationMember,
+  type InviteState,
+  type RequestState,
+  type User,
+} from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../db.js';
 import { fail, parseInput } from '../errors.js';
 import { publishToUsers } from '../pubsub.js';
+import { RateLimiter } from '../rateLimit.js';
 import { blockedBetween, hasBlocked } from './blocks.js';
 import { cancelRequestsFor } from './media.js';
 import { messageInclude, type MessageWithSender } from '../types.js';
@@ -37,7 +45,52 @@ export interface ConversationView {
   themeSetAt: Date | null;
   /** Groups: colours members picked for themselves. */
   memberColors: Array<{ userId: string; color: string }>;
+  /** Direct chats: a message request that hasn't been accepted. Null: an ordinary chat. */
+  request: RequestView | null;
+  /** Groups: people invited who haven't joined (pending or declined). */
+  invites: MemberInviteView[];
 }
+
+export interface RequestView {
+  state: RequestState;
+  /** The viewer started it (and waits for the answer). */
+  sentByMe: boolean;
+  sentAt: Date | null;
+  respondedAt: Date | null;
+}
+
+export interface MemberInviteView {
+  user: User;
+  invitedBy: User;
+  state: InviteState;
+  createdAt: Date;
+  respondedAt: Date | null;
+}
+
+/**
+ * New message requests and group invites, per sender: 20 people an hour. Each request is a single
+ * message, so this only bounds how many strangers one account can knock on.
+ */
+export const requestLimiter = new RateLimiter(20, 60 * 60_000);
+
+function spendRequests(userId: string, count: number) {
+  if (!requestLimiter.allow(userId))
+    throw fail('RATE_LIMITED', 'You’ve reached out to a lot of people. Try again later');
+  for (let i = 0; i < count; i++) requestLimiter.hit(userId);
+}
+
+/**
+ * Which conversations `userId` can see. A message request reaches its recipient only once its one
+ * message is sent, and leaves their list for good when they decline it.
+ */
+export const visibleTo = (userId: string): Prisma.ConversationWhereInput => ({
+  members: { some: { userId } },
+  OR: [
+    { requestState: null },
+    { requestedById: userId },
+    { requestState: 'PENDING', requestSentAt: { not: null } },
+  ],
+});
 
 const reactionPreviewInclude = {
   user: true,
@@ -72,6 +125,7 @@ const usernamesSchema = z
 
 const include = {
   themeSetBy: true,
+  invites: { include: { user: true, invitedBy: true }, orderBy: { createdAt: 'asc' } },
   // Join order, with a tiebreak: automatic member colours follow it, so it must be stable.
   members: { include: { user: true }, orderBy: [{ joinedAt: 'asc' }, { userId: 'asc' }] },
   messages: {
@@ -97,8 +151,11 @@ async function toView(userId: string, row: Row): Promise<ConversationView> {
   const members = row.members.map((m) => m.user);
   const peer = row.type === 'DIRECT' ? (members.find((u) => u.id !== userId) ?? null) : null;
   const blockedByMe = peer ? await hasBlocked(userId, peer.id) : false;
+  // A request isn't a chat yet: no composer, replies, reactions or themes (the sender's one
+  // message goes through the request composer instead).
   const canMessage =
-    row.type === 'GROUP' || (peer !== null && !(await blockedBetween(userId, peer.id)));
+    row.requestState === null &&
+    (row.type === 'GROUP' || (peer !== null && !(await blockedBetween(userId, peer.id))));
   return {
     id: row.id,
     type: row.type,
@@ -123,6 +180,21 @@ async function toView(userId: string, row: Row): Promise<ConversationView> {
       row.type === 'GROUP'
         ? row.members.flatMap((m) => (m.color ? [{ userId: m.userId, color: m.color }] : []))
         : [],
+    request: row.requestState
+      ? {
+          state: row.requestState,
+          sentByMe: row.requestedById === userId,
+          sentAt: row.requestSentAt,
+          respondedAt: row.requestRespondedAt,
+        }
+      : null,
+    invites: row.invites.map((i) => ({
+      user: i.user,
+      invitedBy: i.invitedBy,
+      state: i.state,
+      createdAt: i.createdAt,
+      respondedAt: i.respondedAt,
+    })),
   };
 }
 
@@ -138,6 +210,23 @@ export async function requireMember(
   return member;
 }
 
+/**
+ * Like `requireMember`, and refuses while the chat is a message request: typing, reactions and
+ * themes wait until it's accepted.
+ */
+export async function requireOpenChat(
+  userId: string,
+  conversationId: string,
+): Promise<ConversationMember> {
+  const member = await requireMember(userId, conversationId);
+  const { requestState } = await prisma.conversation.findUniqueOrThrow({
+    where: { id: conversationId },
+    select: { requestState: true },
+  });
+  if (requestState) throw fail('FORBIDDEN', 'That can wait until the request is accepted');
+  return member;
+}
+
 export async function memberIds(conversationId: string): Promise<string[]> {
   const rows = await prisma.conversationMember.findMany({
     where: { conversationId },
@@ -149,7 +238,7 @@ export async function memberIds(conversationId: string): Promise<string[]> {
 export async function listConversations(userId: string): Promise<ConversationView[]> {
   const rows = await prisma.conversation.findMany({
     // Direct chats you removed stay out of the list until something new happens in them.
-    where: { members: { some: { userId, hiddenAt: null } } },
+    where: { AND: [visibleTo(userId), { members: { some: { userId, hiddenAt: null } } }] },
     orderBy: { lastMessageAt: 'desc' },
     include,
   });
@@ -162,13 +251,13 @@ export async function getConversation(
   id: string,
 ): Promise<ConversationView | null> {
   const row = await prisma.conversation.findFirst({
-    where: { id, members: { some: { userId } } },
+    where: { id, ...visibleTo(userId) },
     include,
   });
   return row ? toView(userId, row) : null;
 }
 
-async function requireView(userId: string, id: string): Promise<ConversationView> {
+export async function requireView(userId: string, id: string): Promise<ConversationView> {
   const view = await getConversation(userId, id);
   if (!view) throw fail('NOT_FOUND', 'Conversation not found');
   return view;
@@ -193,6 +282,14 @@ async function usersByUsername(usernames: string[]): Promise<User[]> {
 const notify = (ids: Iterable<string>, conversationId: string) =>
   publishToUsers(ids, { __typename: 'ConversationUpdated', conversationId });
 
+/** Tells invitees their invite to this group changed (it's resolved per person, null once gone). */
+export const notifyInvites = (ids: Iterable<string>, conversationId: string) =>
+  publishToUsers(ids, { __typename: 'InviteChanged', conversationId });
+
+/**
+ * Opens the direct chat with someone. A new one starts as a message request: the starter can send
+ * one message, text only, and the other person accepts or declines it.
+ */
 export async function startDirect(userId: string, username: string): Promise<ConversationView> {
   const handle = username.trim().toLowerCase().replace(/^@/, '');
   if (!handle) throw fail('BAD_USER_INPUT', 'Enter a username', { field: 'username' });
@@ -202,7 +299,6 @@ export async function startDirect(userId: string, username: string): Promise<Con
 
   const directKey = [userId, other.id].sort().join(':');
   let conversation = await prisma.conversation.findUnique({ where: { directKey } });
-  let created = false;
   // Someone who blocked you can't be reached by a new chat. (An existing one still opens.)
   if (!conversation && (await hasBlocked(other.id, userId)))
     throw fail('FORBIDDEN', 'You can’t message this person');
@@ -213,10 +309,11 @@ export async function startDirect(userId: string, username: string): Promise<Con
           type: 'DIRECT',
           directKey,
           createdById: userId,
+          requestState: 'PENDING',
+          requestedById: userId,
           members: { create: [{ userId }, { userId: other.id }] },
         },
       });
-      created = true;
     } catch (err) {
       // Both people started the chat at the same moment: the unique key picked a winner.
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
@@ -225,13 +322,34 @@ export async function startDirect(userId: string, username: string): Promise<Con
     }
   }
   if (!conversation) throw fail('NOT_FOUND', 'Conversation not found');
+
+  const toOther = conversation.requestedById !== userId;
+  const takeover =
+    conversation.requestState === 'PENDING' && toOther && !conversation.requestSentAt;
+  const reopened = conversation.requestState === 'DECLINED' && toOther;
+  if (takeover) {
+    // They opened a chat with you but never wrote: you're the one writing first, so the request
+    // is yours. (The atomic claim in sendMessage still allows only one message between you.)
+    await prisma.conversation.updateMany({
+      where: { id: conversation.id, requestState: 'PENDING', requestSentAt: null },
+      data: { requestedById: userId },
+    });
+  } else if (reopened) {
+    // You declined their request, and now you're reaching out: they wanted to talk, so it opens.
+    await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { requestState: null, requestRespondedAt: new Date() },
+    });
+  }
   // Starting a chat you had removed brings it back.
-  const unhidden = await prisma.conversationMember.updateMany({
+  await prisma.conversationMember.updateMany({
     where: { conversationId: conversation.id, userId, hiddenAt: { not: null } },
     data: { hiddenAt: null },
   });
-  if (created) notify([userId, other.id], conversation.id);
-  else if (unhidden.count > 0) notify([userId], conversation.id);
+  // Your other tabs learn about it. The other person only does once there's something to see
+  // (the request's message), when a declined request opens up again, or when their empty request
+  // just became yours (their tabs drop it until your message arrives).
+  notify(reopened || takeover ? [userId, other.id] : [userId], conversation.id);
   return requireView(userId, conversation.id);
 }
 
@@ -248,18 +366,23 @@ export async function createGroup(
   if (users.length === 0)
     throw fail('BAD_USER_INPUT', 'Pick at least one person other than yourself');
   await refuseBlockers(userId, users);
+  spendRequests(userId, users.length);
 
+  // Only the creator is a member. Everyone else is invited and joins if they want to.
   const conversation = await prisma.conversation.create({
     data: {
       type: 'GROUP',
       name: groupName,
       createdById: userId,
-      members: {
-        create: [{ userId, role: 'OWNER' }, ...users.map((u) => ({ userId: u.id }))],
-      },
+      members: { create: [{ userId, role: 'OWNER' }] },
+      invites: { create: users.map((u) => ({ userId: u.id, invitedById: userId })) },
     },
   });
-  notify([userId, ...users.map((u) => u.id)], conversation.id);
+  notify([userId], conversation.id);
+  notifyInvites(
+    users.map((u) => u.id),
+    conversation.id,
+  );
   return requireView(userId, conversation.id);
 }
 
@@ -283,15 +406,28 @@ export async function addMembers(
   );
   const users = await usersByUsername(handles);
   const existing = new Set(await memberIds(conversationId));
+  const invited = new Map(
+    (await prisma.groupInvite.findMany({ where: { conversationId } })).map((i) => [i.userId, i]),
+  );
   const fresh = users.filter((u) => !existing.has(u.id));
   if (fresh.length === 0) throw fail('CONFLICT', 'They’re already in this group');
-  await refuseBlockers(userId, fresh);
+  // A declined invite is final for this group.
+  const declined = fresh.find((u) => invited.get(u.id)?.state === 'DECLINED');
+  if (declined) throw fail('CONFLICT', `${declined.displayName} declined an invite to this group`);
+  const toInvite = fresh.filter((u) => !invited.has(u.id));
+  if (toInvite.length === 0) throw fail('CONFLICT', 'They’re already invited');
+  await refuseBlockers(userId, toInvite);
+  spendRequests(userId, toInvite.length);
 
-  await prisma.conversationMember.createMany({
-    data: fresh.map((u) => ({ conversationId, userId: u.id })),
+  await prisma.groupInvite.createMany({
+    data: toInvite.map((u) => ({ conversationId, userId: u.id, invitedById: userId })),
     skipDuplicates: true,
   });
   notify(await memberIds(conversationId), conversationId);
+  notifyInvites(
+    toInvite.map((u) => u.id),
+    conversationId,
+  );
   return requireView(userId, conversationId);
 }
 
@@ -318,7 +454,16 @@ export async function leaveGroup(userId: string, conversationId: string): Promis
     orderBy: { joinedAt: 'asc' },
   });
   if (remaining.length === 0) {
+    // The invites go with the group; whoever still had one sees it disappear.
+    const invitees = await prisma.groupInvite.findMany({
+      where: { conversationId, state: 'PENDING' },
+      select: { userId: true },
+    });
     await prisma.conversation.delete({ where: { id: conversationId } });
+    notifyInvites(
+      invitees.map((i) => i.userId),
+      conversationId,
+    );
   } else if (!remaining.some((m) => m.role === 'OWNER')) {
     await prisma.conversationMember.update({
       where: { conversationId_userId: { conversationId, userId: remaining[0]!.userId } },
@@ -360,6 +505,8 @@ export async function hideConversation(userId: string, conversationId: string): 
     where: { id: conversationId },
   });
   if (conversation.type !== 'DIRECT') throw fail('BAD_USER_INPUT', 'Leave the group instead');
+  if (conversation.requestState === 'PENDING' && conversation.requestedById !== userId)
+    throw fail('BAD_USER_INPUT', 'Decline the request instead');
   const now = new Date();
   await prisma.conversationMember.update({
     where: { conversationId_userId: { conversationId, userId } },

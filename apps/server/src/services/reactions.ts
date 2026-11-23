@@ -33,7 +33,9 @@ export async function react(
     select: {
       conversationId: true,
       senderId: true,
-      conversation: { select: { type: true, members: { select: { userId: true } } } },
+      conversation: {
+        select: { type: true, requestState: true, members: { select: { userId: true } } },
+      },
     },
   });
   if (!target) throw fail('NOT_FOUND', 'Message not found');
@@ -44,6 +46,8 @@ export async function react(
   } catch {
     throw fail('NOT_FOUND', 'Message not found');
   }
+  if (target.conversation.requestState)
+    throw fail('FORBIDDEN', 'Reactions can wait until the request is accepted');
   if (target.conversation.type === 'DIRECT') {
     const other = target.conversation.members.find((m) => m.userId !== userId);
     if (!other || (await blockedBetween(userId, other.userId)))

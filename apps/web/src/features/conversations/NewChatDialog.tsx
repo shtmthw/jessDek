@@ -8,6 +8,7 @@ import { Avatar } from '@/components/Avatar';
 import { Button } from '@/components/Button';
 import { Dialog } from '@/components/Dialog';
 import { Field, Input } from '@/components/Input';
+import { Reveal } from '@/components/Reveal';
 import { Segmented } from '@/components/Segmented';
 import { cn } from '@/lib/cn';
 import { upsertConversation } from '@/lib/cacheUpdates';
@@ -255,6 +256,20 @@ export function NewChatDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title="New chat"
+      description="Find people by their exact username."
+    >
+      <NewChatBody onDone={() => onOpenChange(false)} />
+    </Dialog>
+  );
+}
+
+/** Mounted only while the dialog is shown, so each opening starts fresh (and closing changes nothing). */
+function NewChatBody({ onDone }: { onDone: () => void }) {
   const navigate = useNavigate();
   const client = useApolloClient();
   const [tab, setTab] = useState<Tab>('direct');
@@ -265,16 +280,6 @@ export function NewChatDialog({
   const [startDirect] = useMutation(START_DIRECT);
   const [createGroup, group] = useMutation(CREATE_GROUP);
 
-  useEffect(() => {
-    if (!open) {
-      setTab('direct');
-      setMembers([]);
-      setName('');
-      setError(null);
-      setOpening(null);
-    }
-  }, [open]);
-
   async function openDirect(user: User) {
     if (opening) return;
     setError(null);
@@ -284,7 +289,7 @@ export function NewChatDialog({
       const { data } = await startDirect({ variables: { username: user.username } });
       if (!data) return;
       upsertConversation(client, data.startDirect);
-      onOpenChange(false);
+      onDone();
       navigate(`/c/${data.startDirect.id}`);
     } catch (err) {
       setError(messageOf(err));
@@ -301,9 +306,11 @@ export function NewChatDialog({
       });
       if (!data) return;
       upsertConversation(client, data.createGroup);
-      onOpenChange(false);
+      onDone();
       navigate(`/c/${data.createGroup.id}`);
-      toast.success(`Created “${data.createGroup.title}”`);
+      toast.success(`Created “${data.createGroup.title}”`, {
+        description: 'Invites sent. People join when they accept.',
+      });
     } catch (err) {
       setError(messageOf(err));
     }
@@ -315,12 +322,7 @@ export function NewChatDialog({
     );
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={onOpenChange}
-      title="New chat"
-      description="Find people by their exact username."
-    >
+    <>
       <Segmented
         kind="tabs"
         label="Chat type"
@@ -336,58 +338,59 @@ export function NewChatDialog({
         ]}
       />
 
-      {tab === 'group' ? (
-        <motion.div
-          className="mb-4 space-y-4"
-          initial={{ opacity: 0, y: -4 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={spring.soft}
-        >
-          <Field label="Group name">
-            {(p) => (
-              <Input
-                {...p}
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Weekend hike"
-                maxLength={60}
-              />
-            )}
-          </Field>
-          {members.length > 0 ? (
-            <ul className="flex flex-wrap gap-1.5" aria-label="Selected people">
-              <AnimatePresence initial={false} mode="popLayout">
-                {members.map((m) => (
-                  <motion.li
-                    key={m.id}
-                    layout
-                    initial={{ opacity: 0, scale: 0.8 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.8, transition: exit.fast }}
-                    transition={spring.pop}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => toggle(m)}
-                      aria-label={`Remove ${m.displayName}`}
-                      className="inline-flex h-8 items-center gap-1.5 rounded-full bg-muted pl-1 pr-2.5 text-sm font-medium transition-colors hover:bg-border/70"
-                    >
-                      <Avatar
-                        name={m.displayName}
-                        color={m.avatarColor}
-                        avatar={m.avatar}
-                        size="xs"
-                      />
-                      {m.displayName.split(' ')[0]}
-                      <X className="size-3.5 text-muted-foreground" />
-                    </button>
-                  </motion.li>
-                ))}
-              </AnimatePresence>
-            </ul>
-          ) : null}
-        </motion.div>
-      ) : null}
+      <AnimatePresence initial={false}>
+        {tab === 'group' ? (
+          <Reveal key="group" className="pb-4">
+            <Field label="Group name">
+              {(p) => (
+                <Input
+                  {...p}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Weekend hike"
+                  maxLength={60}
+                />
+              )}
+            </Field>
+            <AnimatePresence initial={false}>
+              {members.length > 0 ? (
+                <Reveal key="members" className="pt-4">
+                  <ul className="flex flex-wrap gap-1.5" aria-label="Selected people">
+                    <AnimatePresence initial={false} mode="popLayout">
+                      {members.map((m) => (
+                        <motion.li
+                          key={m.id}
+                          layout
+                          initial={{ opacity: 0, scale: 0.8 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: 0.8, transition: exit.fast }}
+                          transition={spring.pop}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => toggle(m)}
+                            aria-label={`Remove ${m.displayName}`}
+                            className="inline-flex h-8 items-center gap-1.5 rounded-full bg-muted pl-1 pr-2.5 text-sm font-medium transition-colors hover:bg-border/70"
+                          >
+                            <Avatar
+                              name={m.displayName}
+                              color={m.avatarColor}
+                              avatar={m.avatar}
+                              size="xs"
+                            />
+                            {m.displayName.split(' ')[0]}
+                            <X className="size-3.5 text-muted-foreground" />
+                          </button>
+                        </motion.li>
+                      ))}
+                    </AnimatePresence>
+                  </ul>
+                </Reveal>
+              ) : null}
+            </AnimatePresence>
+          </Reveal>
+        ) : null}
+      </AnimatePresence>
 
       <UserPicker
         autoFocus
@@ -396,31 +399,36 @@ export function NewChatDialog({
         onPick={tab === 'direct' ? (u) => void openDirect(u) : toggle}
       />
 
-      {error ? (
-        <motion.p
-          role="alert"
-          className="mt-3 rounded-xl bg-danger/10 px-3.5 py-2.5 text-sm text-danger"
-          initial={{ opacity: 0, y: -4 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={spring.snappy}
-        >
-          {error}
-        </motion.p>
-      ) : null}
+      <AnimatePresence initial={false}>
+        {error ? (
+          <Reveal key="error" className="pt-3">
+            <p role="alert" className="rounded-xl bg-danger/10 px-3.5 py-2.5 text-sm text-danger">
+              {error}
+            </p>
+          </Reveal>
+        ) : null}
+      </AnimatePresence>
 
-      {tab === 'group' ? (
-        <Button
-          className="mt-4 w-full"
-          disabled={!name.trim() || members.length === 0}
-          loading={group.loading}
-          onClick={() => void submitGroup()}
-        >
-          Create group
-          {members.length > 0
-            ? ` with ${members.length} ${members.length === 1 ? 'person' : 'people'}`
-            : ''}
-        </Button>
-      ) : null}
-    </Dialog>
+      <AnimatePresence initial={false}>
+        {tab === 'group' ? (
+          <Reveal key="create" className="pt-4">
+            <Button
+              className="w-full"
+              disabled={!name.trim() || members.length === 0}
+              loading={group.loading}
+              onClick={() => void submitGroup()}
+            >
+              Create group
+              {members.length > 0
+                ? ` and invite ${members.length} ${members.length === 1 ? 'person' : 'people'}`
+                : ''}
+            </Button>
+            <p className="mt-2 text-center text-xs text-muted-foreground">
+              They’ll get an invite and join if they want to.
+            </p>
+          </Reveal>
+        ) : null}
+      </AnimatePresence>
+    </>
   );
 }

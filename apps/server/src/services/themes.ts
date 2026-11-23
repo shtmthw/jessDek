@@ -94,6 +94,8 @@ export async function setChatTheme(
     where: { id: conversationId },
     include: { members: { select: { userId: true } } },
   });
+  if (conversation.requestState)
+    throw fail('FORBIDDEN', 'Themes can wait until the request is accepted');
   if (conversation.type === 'DIRECT') {
     const other = conversation.members.find((m) => m.userId !== userId)?.userId;
     if (!other || (await blockedBetween(userId, other)))

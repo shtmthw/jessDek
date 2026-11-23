@@ -136,6 +136,28 @@ export function parseCardRecipe(raw: unknown): string | null {
   return stored;
 }
 
+/**
+ * The keys the deck matches on (CARD_DECK_PLAN.md §2.1), from a stored recipe: `id:<built-in id>`,
+ * or `t:<custom text, lower-cased>`. Two people match when they share a key.
+ */
+export function interestKeysOf(stored: string | null): string[] {
+  if (!stored) return [];
+  let interests: unknown;
+  try {
+    interests = (JSON.parse(stored) as { interests?: unknown }).interests;
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(interests)) return [];
+  const keys = new Set<string>();
+  for (const it of interests) {
+    if (typeof it === 'string') keys.add(`id:${it}`);
+    else if (it && typeof (it as { t?: unknown }).t === 'string')
+      keys.add(`t:${(it as { t: string }).t.toLowerCase()}`);
+  }
+  return [...keys];
+}
+
 // Every save is a write; 30 a minute per user is plenty for a person clicking Save.
 export const cardLimiter = new RateLimiter(30, 60 * 1000);
 
@@ -146,7 +168,7 @@ export interface CardView {
   shared: boolean | null;
 }
 
-const view = (user: User, viewerId: string | null): CardView => ({
+export const cardView = (user: User, viewerId: string | null): CardView => ({
   id: user.id,
   user,
   recipe: user.card,
@@ -167,13 +189,16 @@ export async function getCard(viewerId: string | null, username: string): Promis
   if (!user) return null;
   if (!viewerId && !user.cardShared) return null;
   if (viewerId && viewerId !== user.id && (await hasBlocked(user.id, viewerId))) return null;
-  return view(user, viewerId);
+  return cardView(user, viewerId);
 }
 
 export async function updateCard(userId: string, input: unknown): Promise<CardView> {
   const src = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
-  const data: { card?: string | null; cardShared?: boolean } = {};
-  if ('recipe' in src) data.card = parseCardRecipe(src.recipe);
+  const data: { card?: string | null; cardShared?: boolean; interestKeys?: string[] } = {};
+  if ('recipe' in src) {
+    data.card = parseCardRecipe(src.recipe);
+    data.interestKeys = interestKeysOf(data.card);
+  }
   if ('shared' in src && src.shared !== null && src.shared !== undefined) {
     if (typeof src.shared !== 'boolean')
       throw fail('BAD_USER_INPUT', 'Invalid value', { field: 'shared' });
@@ -184,5 +209,5 @@ export async function updateCard(userId: string, input: unknown): Promise<CardVi
   }
   cardLimiter.hit(userId);
   const user = await prisma.user.update({ where: { id: userId }, data });
-  return view(user, userId);
+  return cardView(user, userId);
 }

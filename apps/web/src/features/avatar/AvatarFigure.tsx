@@ -119,12 +119,19 @@ export function lineScale(px: number, viewW: number): number {
   return Math.min(1, Math.max(FINE, (MIN_PX * viewW) / (SW * px)));
 }
 
-function useLineWeight(svg: React.RefObject<SVGSVGElement | null>, viewW: number, recipe: Recipe) {
-  // The size it's drawn at (layout size, so a dialog scaling in doesn't change the lines).
-  const [px, setPx] = useState(0);
+function useLineWeight(
+  svg: React.RefObject<SVGSVGElement | null>,
+  viewW: number,
+  recipe: Recipe,
+  size?: number,
+) {
+  // The size it's drawn at (layout size, so a dialog scaling in doesn't change the lines). A known
+  // `size` skips measuring: no forced layout, and no second render once the size comes in.
+  const [measured, setPx] = useState(0);
+  const px = size ?? measured;
   useLayoutEffect(() => {
     const el = svg.current;
-    if (!el) return;
+    if (!el || size !== undefined) return;
     setPx(Math.round(el.clientWidth || el.getBoundingClientRect().width));
     if (typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(([entry]) => {
@@ -132,7 +139,7 @@ function useLineWeight(svg: React.RefObject<SVGSVGElement | null>, viewW: number
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, [svg]);
+  }, [svg, size]);
 
   const scale = Math.round(lineScale(px, viewW) * 100) / 100;
   useLayoutEffect(() => {
@@ -155,6 +162,7 @@ export const AvatarFigure = memo(function AvatarFigure({
   className,
   box,
   anchor = 'figure',
+  size,
 }: {
   recipe: Recipe;
   viewBox?: string;
@@ -166,11 +174,13 @@ export const AvatarFigure = memo(function AvatarFigure({
   anchor?: 'figure' | 'head';
   /** Position and size when nested inside another SVG (the card's avatar frame). */
   box?: { x: number; y: number; width: number; height: number };
+  /** Its width in CSS px when the caller knows it, so it needn't measure itself. */
+  size?: number;
 }) {
   const uid = `av${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
   const p = useMemo(() => paintFor(recipe, uid), [recipe, uid]);
   const svg = useRef<SVGSVGElement>(null);
-  useLineWeight(svg, Number(viewBox.split(/\s+/)[2]) || 200, recipe);
+  useLineWeight(svg, Number(viewBox.split(/\s+/)[2]) || 200, recipe, size);
   const hat: HatItem = (HATS as Record<string, HatItem>)[recipe.hat] ?? NOTHING;
   const hair = item(HAIRS, recipe.hair);
   const top = item(TOPS, recipe.top);

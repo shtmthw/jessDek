@@ -18,7 +18,7 @@
   --danger: #dc2626;
   --online: #22c55e;
   --bubble: #f4f4f5;
-  --scrim: rgb(9 9 11 / 0.36);
+  --scrim: rgb(9 9 11 / 0.42);
   --elevation-sm: 0 1px 2px rgb(24 24 27 / 0.05), 0 1px 1px rgb(24 24 27 / 0.03);
   --elevation-md: 0 4px 12px -2px rgb(24 24 27 / 0.08), 0 2px 4px -2px rgb(24 24 27 / 0.05);
   --elevation-lg: 0 24px 48px -12px rgb(24 24 27 / 0.18), 0 8px 16px -8px rgb(24 24 27 / 0.08);
@@ -44,7 +44,7 @@
   --danger: #f87171;
   --online: #4ade80;
   --bubble: #1c1c21;
-  --scrim: rgb(0 0 0 / 0.6);
+  --scrim: rgb(0 0 0 / 0.64);
   --elevation-sm: 0 1px 2px rgb(0 0 0 / 0.4);
   --elevation-md: 0 4px 12px -2px rgb(0 0 0 / 0.5), 0 2px 4px -2px rgb(0 0 0 / 0.4);
   --elevation-lg: 0 24px 48px -12px rgb(0 0 0 / 0.7), 0 8px 16px -8px rgb(0 0 0 / 0.5);
@@ -95,6 +95,14 @@
     -webkit-tap-highlight-color: transparent;
     text-rendering: optimizeLegibility;
     font-optical-sizing: auto;
+  }
+  /*
+   * A Radix modal sets `pointer-events: none` on <body> while it's open. That property is inherited,
+   * so switching it restyles the whole app, once on open and again on close, right as the dialog
+   * animates. While one of our dialogs is up its scrim covers the page anyway, so keep it as it is.
+   */
+  body:has(> [data-scrim]) {
+    pointer-events: auto !important;
   }
   button,
   [role='button'] {
@@ -211,25 +219,40 @@
   animation: typing-wave 1.2s ease-in-out infinite;
 }
 
-/* Loading placeholders: a slow light sweep rather than a blink. */
+/*
+ * Loading placeholders: a slow light sweep rather than a blink. The sweep is its own layer moved with
+ * `transform`, so the browser runs it on the compositor; animating `background-position` repainted
+ * every skeleton on every frame. Same band, speed and direction as before.
+ */
 @keyframes shimmer {
   from {
-    background-position: 100% 0;
+    transform: translateX(-50%);
   }
   to {
-    background-position: -100% 0;
+    transform: translateX(50%);
   }
 }
-.skeleton {
-  background: linear-gradient(
+@layer components {
+  .skeleton {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+    background: var(--muted);
+  }
+  .skeleton::after {
+    content: '';
+    position: absolute;
+    inset-block: 0;
+    left: 0;
+    width: 200%;
+    background: linear-gradient(
       90deg,
       transparent 25%,
       color-mix(in srgb, var(--background) 55%, transparent) 50%,
       transparent 75%
-    )
-    var(--muted);
-  background-size: 200% 100%;
-  animation: shimmer 1.6s linear infinite;
+    );
+    animation: shimmer 1.6s linear infinite;
+  }
 }
 
 /* Splash: the mark breathes while the session loads. */
@@ -260,7 +283,9 @@
   .typing-dot {
     animation-name: typing-fade;
   }
-  .skeleton,
+  .skeleton::after {
+    display: none;
+  }
   .breathe {
     animation: none;
   }

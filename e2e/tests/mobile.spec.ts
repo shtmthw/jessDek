@@ -10,7 +10,7 @@ test('phone layout: one pane at a time, with back navigation', async ({ browser 
   const a = await newUser(browser, unique('alice'), PHONE);
   const b = await newUser(browser, unique('bob'), PHONE);
 
-  await startDirect(a.page, b.username);
+  await startDirect(a, b);
   await send(a.page, 'ping');
   // Chat is full screen: the sidebar is hidden.
   await expect(a.page.getByRole('heading', { name: 'Chats' })).toBeHidden();
@@ -39,7 +39,7 @@ test('phone layout: one pane at a time, with back navigation', async ({ browser 
 test('phone layout: photo controls are easy to tap', async ({ browser }) => {
   const a = await newUser(browser, unique('alice'), PHONE);
   const b = await newUser(browser, unique('bob'), PHONE);
-  await startDirect(a.page, b.username);
+  await startDirect(a, b);
 
   const attachButton = await a.page
     .getByRole('button', { name: 'Add photos or videos' })
@@ -83,7 +83,7 @@ test('phone layout: photo controls are easy to tap', async ({ browser }) => {
 test('phone layout: the viewer fills the screen and a drag down closes it', async ({ browser }) => {
   const a = await newUser(browser, unique('alice'), PHONE);
   const b = await newUser(browser, unique('bob'), PHONE);
-  await startDirect(a.page, b.username);
+  await startDirect(a, b);
   await attach(a.page, fixture('photo-gps.jpg'));
   await a.page.getByRole('button', { name: 'Send message' }).click();
 

@@ -60,9 +60,15 @@ const cache = new InMemoryCache({
     Query: {
       fields: {
         messages: { keyArgs: ['conversationId'], merge: mergeMessagePages },
+        // The chat list and pending invites always arrive whole (a fetch, or the list after a
+        // live change): replace them.
+        conversations: { merge: false },
+        invites: { merge: false },
       },
     },
     MessagePage: { keyFields: false },
+    // A group's invites (no ids of their own) are always sent whole: replace them.
+    Conversation: { fields: { invites: { merge: false } } },
     // A message's reactions always arrive whole (from a fetch, a reaction or a live event): replace them.
     Message: { fields: { reactions: { merge: false } } },
   },

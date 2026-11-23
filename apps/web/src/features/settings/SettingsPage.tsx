@@ -3,12 +3,14 @@ import {
   ArrowLeft,
   Check,
   Copy,
+  Feather,
   LogOut,
   Monitor,
   Moon,
   Pencil,
   Play,
   Share,
+  Sparkles,
   Sun,
 } from 'lucide-react';
 import { AnimatePresence, motion, type Variants } from 'motion/react';
@@ -32,6 +34,7 @@ import { prefersReducedMotion } from '@/lib/media';
 import { easeOut, exit, spring } from '@/lib/motion';
 import { playSound, useSoundsEnabled, type SoundKind } from '@/lib/sounds';
 import { useThemePreference, type ThemePreference } from '@/lib/theme';
+import { useDeckQuality, type DeckQuality } from '@/lib/deckQuality';
 import { CardView } from '../card/CardView';
 import { parseCard } from '../card/recipe';
 import { cardUrl, copyCardLink, shareCard } from '../card/share';
@@ -58,6 +61,21 @@ const swap = {
   exit: { opacity: 0, y: -6, transition: exit.fast },
   transition: spring.soft,
 };
+
+const DECK_QUALITY: Array<{ value: DeckQuality; label: string; icon: typeof Sun; hint: string }> = [
+  {
+    value: 'full',
+    label: 'Full quality',
+    icon: Sparkles,
+    hint: 'Every card in full: stickers, patterns, finishes and shadows.',
+  },
+  {
+    value: 'light',
+    label: 'Light',
+    icon: Feather,
+    hint: 'Simpler cards and snappier motion while you browse, easier on older phones and laptops. A card you open is always shown in full.',
+  },
+];
 
 const THEMES: Array<{ value: ThemePreference; label: string; icon: typeof Sun }> = [
   { value: 'system', label: 'System', icon: Monitor },
@@ -116,6 +134,7 @@ export function SettingsPage() {
   const navigate = useNavigate();
   const [theme, setTheme] = useThemePreference();
   const [soundsOn, setSoundsOn] = useSoundsEnabled();
+  const [deckQuality, setDeckQuality] = useDeckQuality();
   const [displayName, setDisplayName] = useState(viewer.displayName);
   const [updateProfile, update] = useMutation(UPDATE_PROFILE);
   const [signOut, out] = useMutation(SIGN_OUT);
@@ -272,6 +291,29 @@ export function SettingsPage() {
               icon: <Icon className="size-4" />,
             }))}
           />
+        </Section>
+
+        <Section
+          id="discover-heading"
+          title="Discover"
+          description="How the card deck is drawn on this device."
+        >
+          <div>
+            <Segmented
+              kind="radio"
+              label="Card deck"
+              value={deckQuality}
+              onChange={setDeckQuality}
+              options={DECK_QUALITY.map(({ value, label, icon: Icon }) => ({
+                value,
+                label,
+                icon: <Icon className="size-4" />,
+              }))}
+            />
+            <p className="mt-2 text-xs text-muted-foreground" aria-live="polite">
+              {DECK_QUALITY.find((o) => o.value === deckQuality)?.hint}
+            </p>
+          </div>
         </Section>
 
         <Section

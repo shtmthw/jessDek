@@ -22,6 +22,16 @@ enum MemberRole {
   MEMBER
 }
 
+enum RequestState {
+  PENDING
+  DECLINED
+}
+
+enum InviteState {
+  PENDING
+  DECLINED
+}
+
 model User {
   id           String    @id @default(cuid())
   username     String    @unique
@@ -35,6 +45,9 @@ model User {
   card         String?
   /// Signed-out visitors can open the card at /@username.
   cardShared   Boolean   @default(false)
+  /// Derived from the card's interests on every save (services/cards.ts): `id:<built-in id>` or
+  /// `t:<custom text, lower-cased>`. The deck matches people who share at least one key.
+  interestKeys String[]  @default([])
   /// When they closed the one-time welcome. Null: a new account that hasn't seen it yet.
   welcomedAt   DateTime?
   createdAt    DateTime  @default(now())
@@ -47,6 +60,11 @@ model User {
   blocking     Block[]              @relation("Blocker")
   blockedBy    Block[]              @relation("Blocked")
   reactions    Reaction[]
+  requestsSent Conversation[]       @relation("Requester")
+  invites      GroupInvite[]        @relation("Invitee")
+  invitesSent  GroupInvite[]        @relation("Inviter")
+
+  @@index([interestKeys], type: Gin)
 }
 
 /// `blocker` blocked `blocked`: no DMs or group invites from them, and no presence or typing
@@ -64,24 +82,34 @@ model Block {
 }
 
 model Conversation {
-  id            String           @id @default(cuid())
-  type          ConversationType
-  name          String?
+  id                 String           @id @default(cuid())
+  type               ConversationType
+  name               String?
   // "<smallerUserId>:<largerUserId>" for DIRECT chats, so a pair can only exist once.
-  directKey     String?          @unique
-  createdById   String
-  createdAt     DateTime         @default(now())
-  lastMessageAt DateTime         @default(now())
+  directKey          String?          @unique
+  createdById        String
+  createdAt          DateTime         @default(now())
+  lastMessageAt      DateTime         @default(now())
   /// Chat theme recipe (JSON, at most 512 bytes). Null means Classic. Drawn by the client.
-  theme         String?
+  theme              String?
   /// Who last changed the theme, and when (only the latest change is kept).
-  themeSetById  String?
-  themeSetAt    DateTime?
+  themeSetById       String?
+  themeSetAt         DateTime?
+  /// Direct chats only: a message request. Null is an ordinary chat (accepted, or older than requests).
+  requestState       RequestState?
+  /// Who started the request. The other member is the one who answers it.
+  requestedById      String?
+  /// When the one request message was sent. Null: nothing sent yet, so the other person can't see it.
+  requestSentAt      DateTime?
+  /// When the request was declined.
+  requestRespondedAt DateTime?
 
-  createdBy  User                 @relation("ConversationCreator", fields: [createdById], references: [id])
-  themeSetBy User?                @relation("ThemeSetter", fields: [themeSetById], references: [id], onDelete: SetNull)
-  members    ConversationMember[]
-  messages   Message[]
+  createdBy   User                 @relation("ConversationCreator", fields: [createdById], references: [id])
+  themeSetBy  User?                @relation("ThemeSetter", fields: [themeSetById], references: [id], onDelete: SetNull)
+  requestedBy User?                @relation("Requester", fields: [requestedById], references: [id], onDelete: SetNull)
+  members     ConversationMember[]
+  messages    Message[]
+  invites     GroupInvite[]
 
   @@index([lastMessageAt])
 }
@@ -104,6 +132,24 @@ model ConversationMember {
 
   @@id([conversationId, userId])
   @@index([userId])
+}
+
+/// Someone invited to a group who hasn't joined. Never a member: they see nothing of the group
+/// but its name and people until they join. A declined invite stays, so it can't be sent again.
+model GroupInvite {
+  conversationId String
+  userId         String
+  invitedById    String
+  state          InviteState @default(PENDING)
+  createdAt      DateTime    @default(now())
+  respondedAt    DateTime?
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation("Invitee", fields: [userId], references: [id], onDelete: Cascade)
+  invitedBy    User         @relation("Inviter", fields: [invitedById], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, userId])
+  @@index([userId, state])
 }
 
 model Message {

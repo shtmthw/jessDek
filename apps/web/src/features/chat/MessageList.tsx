@@ -2,6 +2,7 @@ import { AlertCircle, ArrowDown, Check, Loader2, RotateCcw, X } from 'lucide-rea
 import { AnimatePresence, motion } from 'motion/react';
 import { toast } from 'sonner';
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -21,6 +22,7 @@ import { prefersReducedMotion } from '@/lib/media';
 import { buildTimeline, type ChatMessage, type TimelineItem } from '@/lib/messages';
 import { exit, spring } from '@/lib/motion';
 import { formatClock } from '@/lib/time';
+import { useStable } from '@/lib/useStable';
 import type { Typer } from '../realtime/typing';
 import { MessageMenu, type MenuRequest } from './actions/MessageMenu';
 import { MessageToolbar, SwipeReplyHint } from './actions/MessageToolbar';
@@ -243,7 +245,39 @@ interface RowActions {
   onJump: (messageId: string) => void;
 }
 
-function MessageRow({
+/**
+ * A message's row. Only a message that arrives while the chat is open plays an entrance; history
+ * mounts as a plain element, which keeps opening a chat and loading older messages light.
+ */
+function RowShell({
+  enters,
+  mine,
+  children,
+}: {
+  enters: boolean;
+  mine: boolean;
+  children: ReactNode;
+}) {
+  const className = cn(
+    'group/msg flex w-full items-center gap-2',
+    mine ? 'flex-row-reverse' : 'flex-row',
+  );
+  if (!enters) return <div className={className}>{children}</div>;
+  return (
+    <motion.div
+      className={className}
+      style={{ transformOrigin: mine ? '100% 100%' : '0% 100%' }}
+      initial={{ opacity: 0, y: mine ? 16 : 10, scale: mine ? 0.92 : 0.96 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={mine ? spring.send : spring.soft}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+/** Memoised: a new message, a timer or the typing bubble re-renders the list, not every row in it. */
+const MessageRow = memo(function MessageRow({
   message,
   mine,
   first,
@@ -282,6 +316,8 @@ function MessageRow({
   menuOpen: boolean;
 }) {
   const [reveal, setReveal] = useState(false);
+  // Decided once: a row never swaps elements mid-entrance.
+  const [enters] = useState(fresh);
   const media = message.attachments?.length ? message.attachments : null;
   const sharing = useSharingSummary(
     mine && media ? media.flatMap((m) => [m.sha256, m.posterSha256 ?? undefined]) : [],
@@ -320,16 +356,7 @@ function MessageRow({
 
   return (
     <div className={cn('flex w-full flex-col', mine ? 'items-end' : 'items-start')}>
-      <motion.div
-        className={cn(
-          'group/msg flex w-full items-center gap-2',
-          mine ? 'flex-row-reverse' : 'flex-row',
-        )}
-        style={{ transformOrigin: mine ? '100% 100%' : '0% 100%' }}
-        initial={fresh ? { opacity: 0, y: mine ? 16 : 10, scale: mine ? 0.92 : 0.96 } : false}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        transition={mine ? spring.send : spring.soft}
-      >
+      <RowShell enters={enters} mine={mine}>
         <div
           ref={wrap}
           data-message-key={message.id}
@@ -419,7 +446,7 @@ function MessageRow({
             onMore={(button) => openMenu('full', button)}
           />
         ) : null}
-      </motion.div>
+      </RowShell>
       <StatusLine
         message={message}
         showDelivery={showDelivery}
@@ -429,7 +456,7 @@ function MessageRow({
       />
     </div>
   );
-}
+});
 
 /** A theme change (or another event) shown in the timeline, and how to act on it. */
 export interface ChatNotice {
@@ -567,17 +594,27 @@ export function MessageList({
   const byKey = (key: string | null) => (key ? messages.find((m) => m.id === key) : undefined);
   const closeMenu = useCallback(() => setMenu(null), []);
 
-  const rowActions: RowActions = {
-    canAct,
-    viewerId,
-    onMenu: (message, request) => setMenu({ key: message.id, request }),
-    onReply: (message) => {
-      const id = serverIdOf(message);
-      if (id) onReply(id);
-    },
-    onOpenReactions: (message) => setReactionsFor(message.id),
-    onJump,
-  };
+  // Stable callbacks for the memoised rows (the parent passes fresh inline ones on every render).
+  const replyFrom = useStable((message: DisplayMessage) => {
+    const id = serverIdOf(message);
+    if (id) onReply(id);
+  });
+  const jumpTo = useStable(onJump);
+  const rowMemberName = useStable(memberName);
+  const rowOpenMedia = useStable(onOpenMedia);
+  const rowRetry = useStable(onRetry);
+  const rowDiscard = useStable(onDiscard);
+  const rowActions = useMemo<RowActions>(
+    () => ({
+      canAct,
+      viewerId,
+      onMenu: (message, request) => setMenu({ key: message.id, request }),
+      onReply: replyFrom,
+      onOpenReactions: (message) => setReactionsFor(message.id),
+      onJump: jumpTo,
+    }),
+    [canAct, viewerId, replyFrom, jumpTo],
+  );
 
   /** React to a message on screen by its display key. */
   function reactTo(key: string, emoji: string | null) {
@@ -886,10 +923,10 @@ export function MessageList({
               showDelivery={m === lastMessage}
               conversationId={conversationId}
               isGroup={isGroup}
-              memberName={memberName}
-              onOpenMedia={onOpenMedia}
-              onRetry={onRetry}
-              onDiscard={onDiscard}
+              memberName={rowMemberName}
+              onOpenMedia={rowOpenMedia}
+              onRetry={rowRetry}
+              onDiscard={rowDiscard}
               actions={rowActions}
               flash={flashId !== null && (m.serverId ?? m.id) === flashId}
               tabbable={m.id === tabKey}

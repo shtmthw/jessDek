@@ -1,5 +1,5 @@
 import { useQuery } from '@apollo/client';
-import { Settings, SquarePen } from 'lucide-react';
+import { Compass, Settings, SquarePen } from 'lucide-react';
 import {
   AnimatePresence,
   animate,
@@ -17,6 +17,7 @@ import {
   lazy,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -53,16 +54,23 @@ import { easeOut, spring } from '@/lib/motion';
 import { ChatView } from './chat/ChatView';
 import { ConnectionBanner } from './ConnectionBanner';
 import { ConversationList, sortConversations } from './conversations/ConversationList';
+import { isIncomingRequest } from './requests/inbox';
+import { InvitePage } from './requests/InvitePage';
+import { RequestsPage } from './requests/RequestsPage';
 import { NewChatDialog } from './conversations/NewChatDialog';
 import { useViewer } from './session/ViewerProvider';
 import { matchCardPath, usePendingChat } from './card/CardRoute';
 import {
   AvatarStudio,
   CardStudio,
+  DeckCardPage,
+  DeckFanPage,
+  DiscoverFront,
   prefetchScreens,
   SettingsPage,
   SignedInCardPage,
 } from './card/lazy';
+import { DeckProvider } from './discover/DeckProvider';
 
 /** Only new accounts ever see it, so it loads on demand. */
 const WelcomeDialog = lazy(() =>
@@ -131,9 +139,14 @@ function PaneRoutes({ location, onNewChat }: { location?: Location; onNewChat: (
       <Routes location={location}>
         <Route path="/" element={<EmptyState onNewChat={onNewChat} />} />
         <Route path="/c/:id" element={<ChatView />} />
+        <Route path="/requests" element={<RequestsPage />} />
+        <Route path="/invite/:id" element={<InvitePage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/settings/avatar" element={<AvatarStudio />} />
         <Route path="/settings/card" element={<CardStudio />} />
+        <Route path="/discover" element={<DiscoverFront />} />
+        <Route path="/discover/deck" element={<DeckFanPage />} />
+        <Route path="/discover/deck/:username" element={<DeckCardPage />} />
         <Route path="/:handle" element={<SignedInCardPage />} />
         {DevMedia ? (
           <Route
@@ -250,8 +263,11 @@ export function AppShell() {
   const chatMatch = matchPath('/c/:id', location.pathname);
   const inPane = Boolean(
     chatMatch ||
+    matchPath('/requests', location.pathname) ||
+    matchPath('/invite/:id', location.pathname) ||
     matchPath('/settings/*', location.pathname) ||
     matchCardPath(location.pathname) ||
+    /^\/discover(\/|$)/.test(location.pathname) ||
     (import.meta.env.DEV && matchPath('/dev/*', location.pathname)),
   );
   const openNewChat = () => setNewChatOpen(true);
@@ -272,10 +288,12 @@ export function AppShell() {
   const listDim = useTransform(paneX, [0, width], [1, 0]);
   const aside = useRef<HTMLElement>(null);
   // Hide the list from view and from assistive tech only once the pane fully covers it.
+  // Runs on every frame of a slide, so it only touches the DOM when the answer changes.
   const coverList = () => {
     const el = aside.current;
     if (!el) return;
     const covered = !desktop && paneX.get() < 1 && paneOpacity.get() > 0.99;
+    if (el.inert === covered) return;
     el.style.visibility = covered ? 'hidden' : '';
     el.inert = covered;
   };
@@ -290,7 +308,11 @@ export function AppShell() {
   }, [width, paneX]);
 
   const { data } = useQuery(CONVERSATIONS, { fetchPolicy: 'cache-first' });
-  const conversations = data?.conversations;
+  // Message requests to you wait under Requests: they aren't chats yet.
+  const conversations = useMemo(
+    () => data?.conversations.filter((c) => !isIncomingRequest(c)),
+    [data],
+  );
 
   // Global keyboard flow. Shortcuts never fire while you're typing, except the modifier ones.
   const state = useRef({ conversations, chatId: chatMatch?.params.id, navigate });
@@ -358,92 +380,112 @@ export function AppShell() {
   }, [unread]);
 
   return (
-    <div className="relative flex h-dvh w-full overflow-clip bg-background">
-      <motion.aside
-        ref={aside}
-        style={{ x: desktop || reduced ? 0 : listX }}
-        className="relative flex w-full shrink-0 flex-col border-border bg-surface md:w-80 md:border-r lg:w-96"
-      >
-        <header className="flex h-[calc(4rem+env(safe-area-inset-top))] shrink-0 items-center justify-between px-4 pt-[env(safe-area-inset-top)]">
-          <h1 className="flex items-center">
-            <Wordmark height={34} />
-            <span className="sr-only">Chats</span>
-          </h1>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="New chat"
-            title={`New chat (${modKey()} K)`}
-            onClick={openNewChat}
-            className="-mr-1.5"
+    <DeckProvider>
+      <div className="relative flex h-dvh w-full overflow-clip bg-background">
+        <motion.aside
+          ref={aside}
+          style={{ x: desktop || reduced ? 0 : listX }}
+          className="relative flex w-full shrink-0 flex-col border-border bg-surface md:w-80 md:border-r lg:w-96"
+        >
+          <header className="flex h-[calc(4rem+env(safe-area-inset-top))] shrink-0 items-center justify-between px-4 pt-[env(safe-area-inset-top)]">
+            <h1 className="flex items-center">
+              <Wordmark height={34} />
+              <span className="sr-only">Chats</span>
+            </h1>
+            <div className="-mr-1.5 flex items-center gap-1">
+              <NavLink
+                to="/discover"
+                aria-label="Discover"
+                title="Discover people who share your interests"
+                className={({ isActive }) =>
+                  cn(
+                    'inline-flex size-11 items-center justify-center rounded-xl transition-colors md:size-9',
+                    isActive
+                      ? 'bg-brand/10 text-brand-text'
+                      : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                  )
+                }
+              >
+                <Compass className="size-5" />
+              </NavLink>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="New chat"
+                title={`New chat (${modKey()} K)`}
+                onClick={openNewChat}
+              >
+                <SquarePen className="size-5" />
+              </Button>
+            </div>
+          </header>
+
+          <ConversationList onNewChat={openNewChat} />
+
+          <NavLink
+            to="/settings"
+            title="Settings"
+            className={({ isActive }) =>
+              cn(
+                'mx-2 mb-[max(0.5rem,env(safe-area-inset-bottom))] mt-1 flex min-h-14 shrink-0 items-center gap-3 rounded-xl px-2.5 py-2 transition-colors',
+                isActive ? 'bg-muted' : 'hover:bg-muted/70',
+              )
+            }
           >
-            <SquarePen className="size-5" />
-          </Button>
-        </header>
+            <Avatar name={viewer.displayName} color={viewer.avatarColor} avatar={viewer.avatar} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-semibold">{viewer.displayName}</span>
+              <span className="block truncate text-xs text-muted-foreground">
+                @{viewer.username}
+              </span>
+            </span>
+            <Settings className="size-[18px] text-muted-foreground" aria-label="Settings" />
+          </NavLink>
 
-        <ConversationList onNewChat={openNewChat} />
-
-        <NavLink
-          to="/settings"
-          title="Settings"
-          className={({ isActive }) =>
-            cn(
-              'mx-2 mb-[max(0.5rem,env(safe-area-inset-bottom))] mt-1 flex min-h-14 shrink-0 items-center gap-3 rounded-xl px-2.5 py-2 transition-colors',
-              isActive ? 'bg-muted' : 'hover:bg-muted/70',
-            )
-          }
-        >
-          <Avatar name={viewer.displayName} color={viewer.avatarColor} avatar={viewer.avatar} />
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-semibold">{viewer.displayName}</span>
-            <span className="block truncate text-xs text-muted-foreground">@{viewer.username}</span>
-          </span>
-          <Settings className="size-[18px] text-muted-foreground" aria-label="Settings" />
-        </NavLink>
-
-        {!desktop && !reduced ? (
-          <motion.div
-            aria-hidden
-            className="pointer-events-none absolute inset-0 bg-black/10 dark:bg-black/50"
-            style={{ opacity: listDim }}
-          />
-        ) : null}
-      </motion.aside>
-
-      {desktop ? (
-        <main className="relative flex min-w-0 flex-1 flex-col bg-background">
-          <PaneRoutes onNewChat={openNewChat} />
-        </main>
-      ) : (
-        <AnimatePresence
-          initial={false}
-          onExitComplete={() => {
-            paneX.set(width);
-            paneOpacity.set(1);
-          }}
-        >
-          {inPane ? (
-            <MobilePane
-              key="pane"
-              x={paneX}
-              opacity={paneOpacity}
-              reduced={reduced}
-              width={width}
-              location={location}
-              onBack={() => navigate('/')}
-              onNewChat={openNewChat}
+          {!desktop && !reduced ? (
+            <motion.div
+              aria-hidden
+              className="pointer-events-none absolute inset-0 bg-black/10 dark:bg-black/50"
+              style={{ opacity: listDim }}
             />
           ) : null}
-        </AnimatePresence>
-      )}
+        </motion.aside>
 
-      <ConnectionBanner />
-      <NewChatDialog open={newChatOpen} onOpenChange={setNewChatOpen} />
-      {welcome ? (
-        <Suspense fallback={null}>
-          <WelcomeDialog />
-        </Suspense>
-      ) : null}
-    </div>
+        {desktop ? (
+          <main className="relative flex min-w-0 flex-1 flex-col bg-background">
+            <PaneRoutes onNewChat={openNewChat} />
+          </main>
+        ) : (
+          <AnimatePresence
+            initial={false}
+            onExitComplete={() => {
+              paneX.set(width);
+              paneOpacity.set(1);
+            }}
+          >
+            {inPane ? (
+              <MobilePane
+                key="pane"
+                x={paneX}
+                opacity={paneOpacity}
+                reduced={reduced}
+                width={width}
+                location={location}
+                onBack={() => navigate('/')}
+                onNewChat={openNewChat}
+              />
+            ) : null}
+          </AnimatePresence>
+        )}
+
+        <ConnectionBanner />
+        <NewChatDialog open={newChatOpen} onOpenChange={setNewChatOpen} />
+        {welcome ? (
+          <Suspense fallback={null}>
+            <WelcomeDialog />
+          </Suspense>
+        ) : null}
+      </div>
+    </DeckProvider>
   );
 }

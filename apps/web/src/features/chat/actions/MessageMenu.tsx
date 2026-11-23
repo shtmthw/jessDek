@@ -11,7 +11,7 @@ import {
 import { createPortal } from 'react-dom';
 import { useChatThemeScope } from '../../theme/ChatWallpaper';
 import { cn } from '@/lib/cn';
-import { exit, spring } from '@/lib/motion';
+import { exit, spring, tf } from '@/lib/motion';
 import { preloadEmojiPicker } from '../reactions/EmojiPickerDialog';
 import { QUICK_REACTIONS } from '../reactions/reactions';
 
@@ -294,9 +294,9 @@ export function MessageMenu({
           left: pos?.bar.left ?? 0,
           transformOrigin: `${mine ? '85%' : '15%'} ${pos?.bar.below ? '0%' : '100%'}`,
         }}
-        initial={{ opacity: 0, scale: 0.6, y: pos?.bar.below ? -6 : 6 }}
-        animate={ready ? { opacity: 1, scale: 1, y: 0 } : undefined}
-        exit={{ opacity: 0, scale: 0.9, transition: exit.fast }}
+        initial={{ opacity: 0, transform: tf({ y: pos?.bar.below ? -6 : 6, scale: 0.6 }) }}
+        animate={ready ? { opacity: 1, transform: tf() } : undefined}
+        exit={{ opacity: 0, transform: tf({ scale: 0.9 }), transition: exit.fast }}
         transition={spring.pop}
       >
         {QUICK_REACTIONS.map((emoji, i) => {
@@ -352,9 +352,9 @@ export function MessageMenu({
             left: pos?.list?.left ?? 0,
             transformOrigin: `${mine ? '100%' : '0%'} 0%`,
           }}
-          initial={{ opacity: 0, scale: 0.94, y: -4 }}
-          animate={ready ? { opacity: 1, scale: 1, y: 0 } : undefined}
-          exit={{ opacity: 0, scale: 0.97, transition: exit.fast }}
+          initial={{ opacity: 0, transform: tf({ y: -4, scale: 0.94 }) }}
+          animate={ready ? { opacity: 1, transform: tf() } : undefined}
+          exit={{ opacity: 0, transform: tf({ scale: 0.97 }), transition: exit.fast }}
           transition={spring.soft}
         >
           <Action icon={Reply} onSelect={onReply}>

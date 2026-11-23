@@ -8,7 +8,7 @@ import {
   useReducedMotion,
   type Transition,
 } from 'motion/react';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { NavLink, useMatch } from 'react-router';
 import { Avatar } from '@/components/Avatar';
 import { buttonClass } from '@/components/Button';
@@ -26,6 +26,8 @@ import { useTypingNames } from '../realtime/typing';
 import { useViewer } from '../session/ViewerProvider';
 import { reactionPreviewText } from '@/lib/reactionText';
 import { themePreviewText } from '../theme/notice';
+import { firstName, isIncomingRequest } from '../requests/inbox';
+import { RequestsRow } from '../requests/RequestsRow';
 
 /** "Photo", "3 photos", "Video"… with a small icon, then the caption if there is one. */
 function MediaPreview({
@@ -58,6 +60,13 @@ function preview(c: Conversation, viewerId: string): React.ReactNode {
   const reacted = reactionPreviewText(c.lastReaction, c.lastMessage, viewerId);
   if (reacted) return reacted;
   const m = c.lastMessage;
+  // Your request, waiting or answered.
+  if (c.request?.sentByMe && c.request.sentAt) {
+    const name = firstName(c.peer?.displayName ?? c.title);
+    return c.request.state === 'DECLINED'
+      ? `${name} declined your request`
+      : `Request sent · waiting for ${name}`;
+  }
   if (!m) return c.type === 'GROUP' ? 'Group created' : 'Say hello 👋';
   const who =
     m.sender.id === viewerId
@@ -128,7 +137,12 @@ function Preview({ c, active }: { c: Conversation; active: boolean }) {
   );
 }
 
-export function ConversationRow({ conversation: c }: { conversation: Conversation }) {
+/** Memoised: an update to one chat (a new message, a typing dot) re-renders that row, not all of them. */
+export const ConversationRow = memo(function ConversationRow({
+  conversation: c,
+}: {
+  conversation: Conversation;
+}) {
   const unread = c.unreadCount > 0;
   const active = useMatch(`/c/${c.id}`) !== null;
   return (
@@ -154,7 +168,8 @@ export function ConversationRow({ conversation: c }: { conversation: Conversatio
         name={c.title}
         color={c.peer?.avatarColor}
         avatar={c.peer?.avatar}
-        online={c.peer?.online}
+        // A request isn't a chat yet: no presence.
+        online={c.request ? undefined : c.peer?.online}
         group={c.type === 'GROUP'}
         className="relative"
       />
@@ -216,7 +231,7 @@ export function ConversationRow({ conversation: c }: { conversation: Conversatio
       </div>
     </NavLink>
   );
-}
+});
 
 const rowEnter: Transition = { height: spring.panel, opacity: { duration: 0.22, delay: 0.05 } };
 const rowExit: Transition = {
@@ -231,10 +246,13 @@ const rowExit: Transition = {
 function ListRow({
   entering,
   reduced,
+  order,
   children,
 }: {
   entering: boolean;
   reduced: boolean;
+  /** The list's rows in order: positions are only measured when it changes, not on every update. */
+  order: string;
   children: ReactNode;
 }) {
   const isPresent = useIsPresent();
@@ -242,6 +260,7 @@ function ListRow({
   return (
     <motion.li
       layout="position"
+      layoutDependency={order}
       className={opening || !isPresent ? 'overflow-hidden' : undefined}
       initial={{ opacity: 0, height: 0 }}
       animate={{ opacity: 1, height: 'auto' }}
@@ -280,7 +299,11 @@ export function ConversationList({ onNewChat }: { onNewChat: () => void }) {
   // Rows present on the first render just appear; later ones open in place.
   const searchRef = useRef<HTMLInputElement>(null);
 
-  const sorted = useMemo(() => sortConversations(data?.conversations ?? []), [data]);
+  // Message requests to you live under Requests, above the list.
+  const sorted = useMemo(
+    () => sortConversations((data?.conversations ?? []).filter((c) => !isIncomingRequest(c))),
+    [data],
+  );
   const visible = useMemo(() => {
     const q = filter.trim().toLowerCase();
     return q
@@ -302,6 +325,7 @@ export function ConversationList({ onNewChat }: { onNewChat: () => void }) {
       }),
     [visible],
   );
+  const order = useMemo(() => rowsWithKeys.map((r) => r.key).join(' '), [rowsWithKeys]);
   // Rows in the list's first real render just appear; rows that arrive later open in place.
   const listReady = useRef(false);
   const hasRows = rowsWithKeys.length > 0;
@@ -400,6 +424,7 @@ export function ConversationList({ onNewChat }: { onNewChat: () => void }) {
           else if (e.key === 'ArrowUp') searchRef.current?.focus();
         }}
       >
+        {data ? <RequestsRow /> : null}
         {loading && !data ? (
           <ListSkeleton />
         ) : error && !data ? (
@@ -438,7 +463,7 @@ export function ConversationList({ onNewChat }: { onNewChat: () => void }) {
                   ever slides across another. */}
               <AnimatePresence initial={false}>
                 {rowsWithKeys.map(({ c, key }) => (
-                  <ListRow key={key} entering={listReady.current} reduced={reduced}>
+                  <ListRow key={key} entering={listReady.current} reduced={reduced} order={order}>
                     <ConversationRow conversation={c} />
                   </ListRow>
                 ))}

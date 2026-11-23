@@ -7,9 +7,11 @@ import { fail } from './errors.js';
 import { pubsub, userTopic } from './pubsub.js';
 import * as cards from './services/cards.js';
 import * as conversations from './services/conversations.js';
+import * as deck from './services/deck.js';
 import * as media from './services/media.js';
 import * as messages from './services/messages.js';
 import * as reactions from './services/reactions.js';
+import * as requests from './services/requests.js';
 import { blockedBetween, listBlocked } from './services/blocks.js';
 import * as safety from './services/safety.js';
 import * as themes from './services/themes.js';
@@ -38,6 +40,15 @@ export const resolvers = {
     blockedUsers: (_: unknown, __: unknown, ctx: Context) => listBlocked(requireUser(ctx)),
     card: (_: unknown, { username }: { username: string }, ctx: Context) =>
       cards.getCard(ctx.userId, username),
+    invites: (_: unknown, __: unknown, ctx: Context) => requests.listInvites(requireUser(ctx)),
+    deckStart: (_: unknown, __: unknown, ctx: Context) => deck.deckStart(requireUser(ctx)),
+    deckCards: (
+      _: unknown,
+      args: { dir: 'LEFT' | 'RIGHT'; cursor: string; limit?: number | null },
+      ctx: Context,
+    ) => deck.deckCards(requireUser(ctx), args.dir, args.cursor, args.limit),
+    deckCard: (_: unknown, { id }: { id: string }, ctx: Context) =>
+      deck.deckCard(requireUser(ctx), id),
   },
 
   Mutation: {
@@ -77,6 +88,18 @@ export const resolvers = {
 
     startDirect: (_: unknown, { username }: { username: string }, ctx: Context) =>
       conversations.startDirect(requireUser(ctx), username),
+    respondToRequest: (
+      _: unknown,
+      args: { conversationId: string; accept: boolean },
+      ctx: Context,
+    ) => requests.respondToRequest(requireUser(ctx), args.conversationId, args.accept),
+    respondToInvite: (
+      _: unknown,
+      args: { conversationId: string; accept: boolean },
+      ctx: Context,
+    ) => requests.respondToInvite(requireUser(ctx), args.conversationId, args.accept),
+    cancelInvite: (_: unknown, args: { conversationId: string; userId: string }, ctx: Context) =>
+      requests.cancelInvite(requireUser(ctx), args.conversationId, args.userId),
     createGroup: (_: unknown, args: { name: string; usernames: string[] }, ctx: Context) =>
       conversations.createGroup(requireUser(ctx), args.name, args.usernames),
     addMembers: (_: unknown, args: { conversationId: string; usernames: string[] }, ctx: Context) =>
@@ -169,6 +192,26 @@ export const resolvers = {
     // Resolved per subscriber so titles / unread counts are always from their point of view.
     conversation: (event: { conversationId: string }, _: unknown, ctx: Context) =>
       ctx.userId ? conversations.getConversation(ctx.userId, event.conversationId) : null,
+  },
+
+  InviteChanged: {
+    invite: (event: { conversationId: string }, _: unknown, ctx: Context) =>
+      ctx.userId ? requests.getInvite(ctx.userId, event.conversationId) : null,
+  },
+
+  GroupInvite: {
+    id: (i: requests.InviteView) => i.conversationId,
+    createdAt: (i: requests.InviteView) => iso(i.createdAt),
+  },
+
+  MessageRequest: {
+    sentAt: (r: { sentAt: Date | null }) => (r.sentAt ? iso(r.sentAt) : null),
+    respondedAt: (r: { respondedAt: Date | null }) => (r.respondedAt ? iso(r.respondedAt) : null),
+  },
+
+  MemberInvite: {
+    createdAt: (i: { createdAt: Date }) => iso(i.createdAt),
+    respondedAt: (i: { respondedAt: Date | null }) => (i.respondedAt ? iso(i.respondedAt) : null),
   },
 
   PresenceChanged: {

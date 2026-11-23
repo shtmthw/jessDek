@@ -105,6 +105,8 @@ describe('live event cache updates', () => {
       themeSetBy: null,
       themeSetAt: null,
       memberColors: [],
+      request: null,
+      invites: [],
     };
     client.cache.writeQuery({ query: CONVERSATIONS, data: { conversations: [dm] } });
 

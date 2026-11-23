@@ -1,6 +1,14 @@
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Page } from '@playwright/test';
-import { attach, newUser, send, startDirect, unique, watchGraphqlBodies } from './helpers';
+import {
+  attach,
+  createGroup,
+  newUser,
+  send,
+  startDirect,
+  unique,
+  watchGraphqlBodies,
+} from './helpers';
 
 const fixture = (name: string) => fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url));
 const PHOTO = fixture('photo-gps.jpg');
@@ -20,7 +28,7 @@ test('a photo goes device to device without its location', async ({ browser }) =
   const b = await newUser(browser, unique('bob'));
   const sizes = watchGraphqlBodies(a.page);
 
-  await startDirect(a.page, b.username);
+  await startDirect(a, b);
   await attach(a.page, PHOTO);
   await expect(a.page.getByRole('list', { name: 'Attachments' })).toBeVisible();
   await sendNow(a.page);
@@ -88,7 +96,7 @@ test('a video shows its poster, then plays', async ({ browser }) => {
   const b = await newUser(browser, unique('bob'));
   const sizes = watchGraphqlBodies(a.page);
 
-  await startDirect(a.page, b.username);
+  await startDirect(a, b);
   await attach(a.page, CLIP);
   await expect(a.page.getByRole('list', { name: 'Attachments' }).getByText('0:02')).toBeVisible();
   await sendNow(a.page);
@@ -116,7 +124,7 @@ test('a video shows its poster, then plays', async ({ browser }) => {
 test('it waits for the sender, and fills in when they are back', async ({ browser }) => {
   const a = await newUser(browser, unique('alice'));
   const b = await newUser(browser, unique('bob'));
-  await startDirect(a.page, b.username);
+  await startDirect(a, b);
   await attach(a.page, PHOTO);
   await sendNow(a.page);
   await expect(log(a.page).getByText('Sent')).toBeVisible();
@@ -147,15 +155,7 @@ test('group members share with each other when the sender is gone', async ({ bro
   const b = await newUser(browser, unique('bob'));
   const c = await newUser(browser, unique('carol'));
 
-  await a.page.getByRole('button', { name: 'New chat' }).first().click();
-  await a.page.getByRole('tab', { name: 'Group' }).click();
-  await a.page.getByLabel('Group name').fill('Photo club');
-  for (const u of [b, c]) {
-    await a.page.getByLabel('Search people by username').fill(u.username.slice(0, 6));
-    await a.page.getByRole('button', { name: new RegExp(`@${u.username}`) }).click();
-  }
-  await a.page.getByRole('button', { name: /Create group with 2 people/ }).click();
-  await expect(a.page.getByRole('heading', { name: 'Photo club' })).toBeVisible();
+  await createGroup(a, 'Photo club', [b, c]);
 
   await attach(a.page, PHOTO);
   await sendNow(a.page);
@@ -180,7 +180,7 @@ test('group members share with each other when the sender is gone', async ({ bro
 test('"Hide my IP address" sends media through the relay', async ({ browser }) => {
   const a = await newUser(browser, unique('alice'));
   const b = await newUser(browser, unique('bob'));
-  await startDirect(a.page, b.username);
+  await startDirect(a, b);
 
   // Bob hides his address in Settings, then goes back to the chat.
   await b.page.getByRole('link', { name: 'Settings' }).click();
@@ -201,7 +201,7 @@ test('"Hide my IP address" sends media through the relay', async ({ browser }) =
 test('a caption and several photos arrive as one message', async ({ browser }) => {
   const a = await newUser(browser, unique('alice'));
   const b = await newUser(browser, unique('bob'));
-  await startDirect(a.page, b.username);
+  await startDirect(a, b);
 
   await attach(a.page, PHOTO, PHOTO, CLIP);
   await expect(a.page.getByRole('list', { name: 'Attachments' }).getByRole('listitem')).toHaveCount(

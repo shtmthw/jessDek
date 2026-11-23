@@ -66,6 +66,8 @@ import { useReact } from './reactions/useReact';
 import { toReplyTo } from './replies/quote';
 import { getReply, setReply, useReply } from './replies/replyStore';
 import { ChatThemeProvider, ChatWallpaper } from '../theme/ChatWallpaper';
+import { canSendRequest, isIncomingRequest } from '../requests/inbox';
+import { IncomingRequestBar, RequestHint, SentRequestBar } from '../requests/RequestBars';
 import { themeChangeText } from '../theme/notice';
 import { parseTheme, themeSpec, type ThemeSpec } from '../theme/recipe';
 import { assignMemberColors, memberVars, themeVars } from '../theme/resolve';
@@ -111,10 +113,29 @@ const sameShas = (a: string[], b: string[]) =>
   a.length === b.length && a.every((s, i) => s === b[i]);
 
 /** A real message as the timeline draws it (server attachments become tiles). */
-const toDisplay = (m: Message): DisplayMessage => ({
-  ...m,
-  attachments: m.attachments.length ? m.attachments.map(fromAttachment) : undefined,
-});
+/*
+ * Cached per message object: Apollo keeps an unchanged message's object across updates, so it keeps
+ * its display object too, and its memoised row in the list doesn't re-render.
+ */
+const displayed = new WeakMap<Message, DisplayMessage>();
+const toDisplay = (m: Message): DisplayMessage => {
+  let d = displayed.get(m);
+  if (!d) {
+    d = { ...m, attachments: m.attachments.length ? m.attachments.map(fromAttachment) : undefined };
+    displayed.set(m, d);
+  }
+  return d;
+};
+/** Your sent message, shown under the key it had while sending. Cached like `toDisplay`. */
+const sentAs = new WeakMap<DisplayMessage, DisplayMessage>();
+const asSent = (shown: DisplayMessage, key: string): DisplayMessage => {
+  let d = sentAs.get(shown);
+  if (!d || d.id !== key) {
+    d = { ...shown, id: key, tempId: key, serverId: shown.id, status: 'sent' };
+    sentAs.set(shown, d);
+  }
+  return d;
+};
 
 const isWindowActive = () => document.visibilityState === 'visible' && document.hasFocus();
 const firstName = (name: string) => name.split(' ')[0] ?? name;
@@ -316,7 +337,7 @@ function ChatScreen({ id }: { id: string }) {
       const key = aliased.get(m.id);
       if (!key) return shown;
       onScreen.add(key);
-      return { ...shown, id: key, tempId: key, serverId: m.id, status: 'sent' as const };
+      return asSent(shown, key);
     });
     const sender = {
       id: viewer.id,
@@ -572,15 +593,24 @@ function ChatScreen({ id }: { id: string }) {
   const isGroup = conversation.type === 'GROUP';
   const peer = conversation.peer;
   const typingText = typingLabel(typingNames);
+  // A message request isn't a chat yet: no presence, no photos, no menu extras.
+  const request = conversation.request;
+  const incoming = isIncomingRequest(conversation);
+  // Your request's one message: the composer locks as soon as it's on its way.
+  const writingRequest =
+    canSendRequest(conversation) && !pending.some((p) => p.status !== 'failed');
+  const pendingInvites = conversation.invites.filter((i) => i.state === 'PENDING').length;
   const subtitle = isGroup
-    ? `${conversation.members.length} members`
-    : conversation.blockedByMe
-      ? 'Blocked'
-      : peer?.online
-        ? 'Online'
-        : peer?.lastSeenAt
-          ? formatLastSeen(peer.lastSeenAt)
-          : '';
+    ? `${conversation.members.length} members${pendingInvites ? ` · ${pendingInvites} invited` : ''}`
+    : request
+      ? 'Message request'
+      : conversation.blockedByMe
+        ? 'Blocked'
+        : peer?.online
+          ? 'Online'
+          : peer?.lastSeenAt
+            ? formatLastSeen(peer.lastSeenAt)
+            : '';
 
   const identity = (
     <>
@@ -588,7 +618,7 @@ function ChatScreen({ id }: { id: string }) {
         name={conversation.title}
         color={peer?.avatarColor}
         avatar={peer?.avatar}
-        online={peer?.online}
+        online={request ? undefined : peer?.online}
         group={isGroup}
       />
       <div className="min-w-0">
@@ -634,7 +664,9 @@ function ChatScreen({ id }: { id: string }) {
         {isGroup ? `Welcome to ${conversation.title}` : `Say hi to ${conversation.title}`}
       </p>
       <p className="max-w-xs text-sm text-muted-foreground">
-        Messages you send here show up instantly.
+        {writingRequest
+          ? `Your first message reaches ${firstName(conversation.title)} as a request.`
+          : 'Messages you send here show up instantly.'}
       </p>
       <Button variant="outline" size="sm" className="mt-4 rounded-full" onClick={() => send('👋')}>
         <span aria-hidden>👋</span> Wave hello
@@ -678,7 +710,7 @@ function ChatScreen({ id }: { id: string }) {
         data-chat-theme={spec.classic ? undefined : spec.id}
         data-bubble-style={spec.bubble}
         style={themeStyle}
-        {...(mediaEnabled ? drop.handlers : {})}
+        {...(mediaEnabled && !request ? drop.handlers : {})}
         initial={desktop ? { opacity: 0 } : false}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.2, ease: easeOut }}
@@ -749,9 +781,11 @@ function ChatScreen({ id }: { id: string }) {
                     Block {firstName(peer.displayName)}
                   </MenuItem>
                 )}
-                <MenuItem icon={Trash2} danger onSelect={() => void actions.hide(conversation)}>
-                  Remove chat
-                </MenuItem>
+                {incoming ? null : (
+                  <MenuItem icon={Trash2} danger onSelect={() => void actions.hide(conversation)}>
+                    Remove chat
+                  </MenuItem>
+                )}
               </>
             ) : null}
           </Menu>
@@ -808,7 +842,25 @@ function ChatScreen({ id }: { id: string }) {
             </OpenMediaContext.Provider>
           )}
 
-          {conversation.canMessage ? (
+          {writingRequest ? (
+            <>
+              <RequestHint conversation={conversation} />
+              <Composer
+                key={`${id}:request`}
+                draftKey={id}
+                autoFocus
+                textOnly
+                onSend={(body) => send(body)}
+                viewerId={viewer.id}
+                placeholder={`Send ${firstName(conversation.title)} a message request`}
+                onWallpaper={!spec.classic}
+              />
+            </>
+          ) : incoming ? (
+            <IncomingRequestBar conversation={conversation} />
+          ) : request ? (
+            <SentRequestBar conversation={conversation} />
+          ) : conversation.canMessage ? (
             <Composer
               key={id}
               draftKey={id}
@@ -879,7 +931,7 @@ function ChatScreen({ id }: { id: string }) {
         ) : null}
 
         <AnimatePresence>
-          {drop.dragging && mediaEnabled ? (
+          {drop.dragging && mediaEnabled && !request ? (
             <DropOverlay
               key="drop"
               name={isGroup ? conversation.title : firstName(conversation.title)}

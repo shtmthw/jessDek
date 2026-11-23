@@ -7,22 +7,30 @@ import {
   useReducedMotion,
   type PanInfo,
 } from 'motion/react';
-import type { ReactNode } from 'react';
+import { useCallback, useRef, useState, type ReactNode } from 'react';
 import { cn } from '@/lib/cn';
 import { useIsDesktop } from '@/lib/media';
-import { exit, spring } from '@/lib/motion';
+import { exit, spring, tf } from '@/lib/motion';
 import { AutoHeight } from './AutoHeight';
 import { Button } from './Button';
 
 const DISMISS_DISTANCE = 110;
 const DISMISS_VELOCITY = 600;
 
-/** A modal that floats near the top on desktop and becomes a draggable bottom sheet on phones. */
+/**
+ * A modal that floats near the top on desktop and becomes a draggable bottom sheet on phones.
+ *
+ * `header` and `footer` stay put above and below the scrolling body (a live preview, actions).
+ * They sit outside the scroll area rather than being sticky inside it: sticky content jumps while
+ * the body's animated height clips it, and jitters under Firefox's async scrolling.
+ */
 export function Dialog({
   open,
   onOpenChange,
   title,
   description,
+  header,
+  footer,
   children,
   className,
 }: {
@@ -30,12 +38,27 @@ export function Dialog({
   onOpenChange: (open: boolean) => void;
   title: string;
   description?: string;
+  header?: ReactNode;
+  footer?: ReactNode;
   children: ReactNode;
   className?: string;
 }) {
   const desktop = useIsDesktop();
   const reduced = useReducedMotion() ?? false;
   const drag = useDragControls();
+
+  // A hairline under the pinned header once the body has scrolled beneath it.
+  const [scrolled, setScrolled] = useState(false);
+  const unwatch = useRef<(() => void) | null>(null);
+  const body = useCallback((el: HTMLDivElement | null) => {
+    unwatch.current?.();
+    unwatch.current = null;
+    if (!el) return;
+    const onScroll = () => setScrolled(el.scrollTop > 2);
+    onScroll();
+    el.addEventListener('scroll', onScroll, { passive: true });
+    unwatch.current = () => el.removeEventListener('scroll', onScroll);
+  }, []);
 
   function onDragEnd(_: unknown, info: PanInfo) {
     if (info.offset.y > DISMISS_DISTANCE || info.velocity.y > DISMISS_VELOCITY) onOpenChange(false);
@@ -47,8 +70,11 @@ export function Dialog({
         {open ? (
           <RadixDialog.Portal forceMount>
             <RadixDialog.Overlay asChild forceMount>
+              {/* No backdrop blur: it re-blurs the whole app under every frame the dialog animates.
+                  `data-scrim`: see index.css (body pointer-events). */}
               <motion.div
-                className="fixed inset-0 z-40 bg-[var(--scrim)] backdrop-blur-[3px]"
+                data-scrim
+                className="fixed inset-0 z-40 bg-[var(--scrim)]"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1, transition: { duration: 0.18 } }}
                 exit={{ opacity: 0, transition: exit.base }}
@@ -68,19 +94,26 @@ export function Dialog({
                   className,
                 )}
                 style={desktop ? { transformOrigin: '50% 0%' } : undefined}
+                // Desktop animates one `transform` string (not motion's separate scale and y), so the
+                // browser runs it on the compositor: mounting the dialog can't stall it. Phones keep
+                // `y`, which the drag-down needs.
                 initial={
                   reduced
                     ? { opacity: 0 }
                     : desktop
-                      ? { opacity: 0, scale: 0.96, y: -8 }
+                      ? { opacity: 0, transform: tf({ y: -8, scale: 0.96 }) }
                       : { y: '100%' }
                 }
-                animate={{ opacity: 1, scale: 1, y: 0 }}
+                animate={desktop ? { opacity: 1, transform: tf() } : { opacity: 1, y: 0 }}
                 exit={
                   reduced
                     ? { opacity: 0, transition: exit.base }
                     : desktop
-                      ? { opacity: 0, scale: 0.97, y: -6, transition: exit.fast }
+                      ? {
+                          opacity: 0,
+                          transform: tf({ y: -6, scale: 0.97 }),
+                          transition: exit.fast,
+                        }
                       : // A spring picks up the speed of a drag-down, so a flick carries straight through.
                         {
                           y: '100%',
@@ -138,9 +171,31 @@ export function Dialog({
                     </Button>
                   </RadixDialog.Close>
                 </div>
-                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-5 pt-2">
+                {header ? (
+                  <div
+                    className={cn(
+                      'shrink-0 border-b px-5 pb-3 pt-2 transition-[border-color] duration-200',
+                      scrolled ? 'border-border' : 'border-transparent',
+                    )}
+                  >
+                    {header}
+                  </div>
+                ) : null}
+                <div
+                  ref={header ? body : undefined}
+                  className={cn(
+                    'min-h-0 flex-1 overflow-y-auto overscroll-contain px-5',
+                    header ? 'pt-3' : 'pt-2',
+                    footer ? 'pb-4' : 'pb-5',
+                  )}
+                >
                   <AutoHeight>{children}</AutoHeight>
                 </div>
+                {footer ? (
+                  <div className="flex shrink-0 justify-end gap-2 border-t border-border px-5 py-3">
+                    {footer}
+                  </div>
+                ) : null}
               </motion.div>
             </RadixDialog.Content>
           </RadixDialog.Portal>

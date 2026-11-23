@@ -1,4 +1,5 @@
 import { Users } from 'lucide-react';
+import { useMemo } from 'react';
 import { AvatarFigure, VIEW_AVATAR, VIEW_CLOSE } from '@/features/avatar/AvatarFigure';
 import { parseRecipe } from '@/features/avatar/recipe';
 import { cn } from '@/lib/cn';
@@ -9,6 +10,9 @@ const sizes = {
   md: 'size-10 text-sm',
   lg: 'size-16 text-xl',
 } as const;
+
+/** The same sizes in px, so the figure needn't measure itself. */
+const px = { xs: 24, sm: 28, md: 40, lg: 64 } as const;
 
 const dots = {
   xs: 'size-2 ring-[1.5px]',
@@ -46,7 +50,9 @@ export function Avatar({
   group?: boolean;
   className?: string;
 }) {
-  const recipe = group ? null : parseRecipe(avatar);
+  // Parsed once per recipe string: a fresh object each render would defeat AvatarFigure's memo and
+  // redo its stroke pass every time a list re-renders.
+  const recipe = useMemo(() => (group ? null : parseRecipe(avatar)), [group, avatar]);
   return (
     <span className={cn('relative inline-flex shrink-0', className)}>
       <span
@@ -65,6 +71,7 @@ export function Avatar({
           <AvatarFigure
             recipe={recipe}
             viewBox={size === 'xs' || size === 'sm' ? VIEW_CLOSE : VIEW_AVATAR}
+            size={px[size]}
             className="absolute inset-0 size-full"
           />
         ) : (

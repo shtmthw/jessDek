@@ -1,4 +1,4 @@
-import { memo, useId } from 'react';
+import { memo, useId, useMemo } from 'react';
 import { AvatarFigure, VIEW_AVATAR, VIEW_FULL } from '../avatar/AvatarFigure';
 import { parseRecipe } from '../avatar/recipe';
 import type { CardRecipe } from './recipe';
@@ -58,6 +58,7 @@ export const CardAvatar = memo(function CardAvatar({
   theme,
   size,
   fade,
+  lite = false,
 }: {
   user: { displayName: string; avatar: string | null; avatarColor: string };
   card: CardRecipe;
@@ -66,9 +67,11 @@ export const CardAvatar = memo(function CardAvatar({
   size: number;
   /** Soften the bottom edge of a cut-out figure (when it doesn't stand on a divider). */
   fade?: boolean;
+  /** A light card: a `glow` ring is drawn plain, without its blurred drop shadows. */
+  lite?: boolean;
 }) {
   const uid = `ca${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
-  const recipe = parseRecipe(user.avatar);
+  const recipe = useMemo(() => parseRecipe(user.avatar), [user.avatar]);
   const character = recipe.style === 'character';
   const cutout = card.frame === 'none' && character;
   const shape = FRAME_PATHS[card.frame] ?? FRAME_PATHS.circle!;
@@ -94,6 +97,7 @@ export const CardAvatar = memo(function CardAvatar({
           recipe={recipe}
           viewBox={VIEW_FULL}
           box={{ x: 0, y: 0, width: 100, height: 100 }}
+          size={size}
         />
       </svg>
     );
@@ -110,7 +114,7 @@ export const CardAvatar = memo(function CardAvatar({
       overflow="visible"
       aria-hidden
       style={
-        card.ring === 'glow'
+        card.ring === 'glow' && !lite
           ? { filter: `drop-shadow(0 0 ${8}px ${theme.line}) drop-shadow(0 0 2px ${theme.line})` }
           : undefined
       }
@@ -135,6 +139,9 @@ export const CardAvatar = memo(function CardAvatar({
             recipe={recipe}
             viewBox={VIEW_AVATAR}
             box={{ x: 0, y: card.frame === 'arch' ? 2 : 0, width: 100, height: 100 }}
+            // Its layout size, so it needn't measure itself: a nested <svg> reports no width and
+            // fell back to a forced layout (and the fan's on-screen scale) on every card mount.
+            size={size}
           />
         ) : (
           <text
