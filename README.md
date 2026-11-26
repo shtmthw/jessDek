@@ -5,7 +5,7 @@
   <img src="docs/brand/jessdek-logo/concepts/f-monogram/wordmark.svg" alt="jessDek" width="300">
 </picture>
 
-**A small, fast chat app. Direct messages and group chats, delivered instantly.**
+**A small, fast chat app. Direct messages and group chats, delivered instantly, with character avatars, shareable cards and a deck for meeting people who like what you like.**
 
 [![CI](https://github.com/shtmthw/jessDek/actions/workflows/ci.yml/badge.svg)](https://github.com/shtmthw/jessDek/actions/workflows/ci.yml)
 [![Docker Hub](https://img.shields.io/docker/pulls/matthew552/jessdek?label=docker%20hub)](https://hub.docker.com/r/matthew552/jessdek)
@@ -40,12 +40,14 @@ To stop, run `docker compose down`. Your data is kept in the `realtime_db` volum
 
 - **Instant delivery.** Messages, typing indicators, unread counts and online status arrive live over WebSockets, with no polling.
 - **Direct messages and group chats.** Find people by username with live search. A new chat starts as a [message request](#message-requests-and-group-invites) the other person accepts, and groups invite people instead of adding them. Rename or leave groups at any time.
-- **Photos and videos, device to device.** Sent straight between browsers over WebRTC and never stored on the server. They can be downloaded while someone who has them is online. Up to 10 per message, with a caption.
+- **Photos and videos, device to device.** Sent straight between browsers over WebRTC and never stored on the server. They can be downloaded while someone who has them is online. Up to 10 per message, with a caption. In **Settings → Photos & videos** you choose what downloads by itself (everything, photos only, or nothing), see how much is kept on the device, and can turn on **Hide my IP address** to send media through the server instead.
 - **Replies and reactions.** Reply to any message and it arrives with a quote of the original; tap the quote to jump back to it. React with one emoji per person: six quick ones, or any emoji from a searchable picker. On phones, long-press a message for reactions and swipe it right to reply; on desktop, hover it or right-click. Reactions are quiet: no sound, and they never count as unread.
 - **Discover people.** A deck of cards from people who share at least one of your interests. Swipe through it, open someone's card and say hi with a suggested opener. See [Discover](#discover-the-card-deck).
 - **You decide who reaches you.** Someone new can send you one text message, which you accept or decline, and a group can only invite you. Block someone and they can't message you, start a chat with you or add you to groups, and neither of you sees the other's online status. Mute any chat, remove a direct chat from your list, and (as a group's owner) remove members.
-- **Pleasant to use.** Messages appear immediately and retry if sending fails. Unread badges, a "new messages" pill, infinite scroll through history, day separators, a reconnecting banner, and `Ctrl/⌘ + K` to start a new chat. New accounts get a one-time welcome that points them to their avatar and card.
-- **Mobile-first.** A single pane with back navigation on phones and two panes on desktop. Respects safe areas, uses 44 px tap targets, follows your system's light or dark theme, and can be installed as a PWA.
+- **Pleasant to use.** Messages appear immediately and retry if sending fails. Unread badges (and a count in the tab title), a "new messages" pill, infinite scroll through history, day separators and a reconnecting banner. A soft chime plays when something happens in a chat you're not looking at, with a gentler one for groups; preview the sounds or turn them off in **Settings → Sounds**. New accounts get a one-time welcome that points them to their avatar and card.
+- **Keyboard friendly.** `Ctrl/⌘ + K` starts a new chat, `/` searches your chats, `Alt + ↑/↓` switches between them and `Esc` closes one. Start typing anywhere in a chat and it lands in the message box. In the message list, the arrow keys walk the messages, `Enter` opens one's actions and `R` replies to it.
+- **Mobile-first.** A single pane on phones (swipe in from the left edge to go back) and two panes on desktop. Respects safe areas, uses 44 px tap targets, and can be installed as a PWA. It follows your device's light or dark setting, or you can pick one in **Settings → Appearance**.
+- **Smooth.** Soft spring animations that run on the compositor wherever they can, so dialogs, menus and the Discover deck stay fluid on modest hardware. If your device asks for reduced motion, jessDek uses less of it.
 - **Secure by default.** argon2id password hashing, httpOnly session cookies, rate limiting, input validation, and membership checks on every operation.
 - **One image.** The API and the web app ship together as `matthew552/jessdek`. The only other container is PostgreSQL.
 
@@ -142,27 +144,27 @@ Cards load lazily from both ends of the deck: five each side to start, then five
 
 </div>
 
-| Light                                                    | Dark                                                         |
-| -------------------------------------------------------- | ------------------------------------------------------------ |
-| ![Group chat](docs/screenshots/desktop-group-light.png)  | ![Group chat, dark theme](docs/screenshots/desktop-group-dark.png) |
+| Light                                                          | Dark                                                                      |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| ![Group chat](docs/screenshots/desktop-group-light.png)        | ![Group chat, dark theme](docs/screenshots/desktop-group-dark.png)        |
 | ![Photos and videos](docs/screenshots/desktop-media-light.png) | ![Photos and videos, dark theme](docs/screenshots/desktop-media-dark.png) |
-| ![Sign up](docs/screenshots/auth-light.png)              | ![Direct message, dark theme](docs/screenshots/desktop-chat-dark.png) |
+| ![Sign up](docs/screenshots/auth-light.png)                    | ![Direct message, dark theme](docs/screenshots/desktop-chat-dark.png)     |
 
 ## Configuration
 
 Set these in `.env` next to `docker-compose.yml`.
 
-| Variable            | Default    | Description                                                                                       |
-| ------------------- | ---------- | ------------------------------------------------------------------------------------------------- |
-| `APP_PORT`          | `8080`     | Port the app is published on                                                                      |
-| `JWT_SECRET`        | _(random)_ | Signs session cookies. If unset, a random secret is generated at startup, so everyone is signed out whenever the container restarts |
-| `POSTGRES_PASSWORD` | `realtime` | Database password                                                                                 |
-| `COOKIE_SECURE`     | `false`    | Set to `true` when serving over HTTPS so cookies are marked `Secure`                              |
-| `MEDIA_ENABLED`     | `true`     | Turns photos and videos on or off                                                                 |
-| `MEDIA_RELAY`       | `true`     | Lets the server pass media between two devices (in memory, nothing kept) when they can't connect directly |
-| `MEDIA_MAX_IMAGE_MB` | `20`      | Largest photo, after the browser has resized it                                                   |
-| `MEDIA_MAX_VIDEO_MB` | `100`     | Largest video                                                                                     |
-| `ICE_SERVERS`       | public STUN | JSON list of STUN/TURN servers for direct connections, e.g. `[{"urls":"turn:turn.example.com","username":"u","credential":"p"}]`. `[]` means same-network only |
+| Variable             | Default     | Description                                                                                                                                                    |
+| -------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `APP_PORT`           | `8080`      | Port the app is published on                                                                                                                                   |
+| `JWT_SECRET`         | _(random)_  | Signs session cookies. If unset, a random secret is generated at startup, so everyone is signed out whenever the container restarts                            |
+| `POSTGRES_PASSWORD`  | `realtime`  | Database password                                                                                                                                              |
+| `COOKIE_SECURE`      | `false`     | Set to `true` when serving over HTTPS so cookies are marked `Secure`                                                                                           |
+| `MEDIA_ENABLED`      | `true`      | Turns photos and videos on or off                                                                                                                              |
+| `MEDIA_RELAY`        | `true`      | Lets the server pass media between two devices (in memory, nothing kept) when they can't connect directly                                                      |
+| `MEDIA_MAX_IMAGE_MB` | `20`        | Largest photo, after the browser has resized it                                                                                                                |
+| `MEDIA_MAX_VIDEO_MB` | `100`       | Largest video                                                                                                                                                  |
+| `ICE_SERVERS`        | public STUN | JSON list of STUN/TURN servers for direct connections, e.g. `[{"urls":"turn:turn.example.com","username":"u","credential":"p"}]`. `[]` means same-network only |
 
 ### Behind a reverse proxy
 
@@ -204,12 +206,14 @@ flowchart LR
 - **Photos and videos never touch the server's disk or database.** The database keeps a small metadata row per file (type, size, dimensions, a hash and a tiny blur placeholder), and a test guards against any column that could hold bytes. The files themselves stay in each person's browser storage.
 - **Direct first.** The two browsers connect over WebRTC data channels; the server only passes the short handshake messages. If that fails (a strict firewall, or someone chose "Hide my IP address"), the server pipes the bytes between the two sockets in memory instead. On HTTPS those frames are encrypted by the browsers, so the server sees only ciphertext.
 - **Pulled from whoever has it.** A device asks which online members of the chat have a file, and the first to answer sends it, so group media stays available after the sender goes offline. With nothing stored on the server, a photo can only be downloaded while someone who has it is online. The app says so ("Waiting for Alice to come online") and fills in by itself when they return. Photos are re-encoded before sending, which removes location data; videos are sent as they are.
+- **Drawn, not uploaded.** Avatars, cards and chat themes are small JSON recipes (at most 1 KiB, 4 KiB and 512 bytes). The server checks each one against a schema before storing it, and the browser draws it as SVG, so there are no image uploads and a change reaches everyone straight away.
+- **The deck is a circle, not a shuffle.** The match filter (someone else who shares an interest, with no block either way) is written once and used by every deck query. Only the starting card is random. From there the deck walks the matches in id order, a page at a time in each direction, and wraps at the end, so nothing is ordered at random and going round brings you back to the start. The full rules are in [CARD_LOADING.md](CARD_LOADING.md).
 - **Presence** is tracked in memory by counting each user's open sockets. This works for a single instance; running several instances behind a load balancer is not supported.
 
-| Layer  | Stack                                                                                              |
-| ------ | -------------------------------------------------------------------------------------------------- |
-| Server | Node 24, TypeScript, Fastify 5, GraphQL Yoga, graphql-ws, Prisma, PostgreSQL 17, zod, jose, argon2 |
-| Web    | React 19, Vite, TypeScript, Tailwind CSS 4, Apollo Client, Radix Dialog, lucide icons              |
+| Layer  | Stack                                                                                                                                                                                   |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Server | Node 24, TypeScript, Fastify 5, GraphQL Yoga, graphql-ws, Prisma 6, PostgreSQL 17, zod, jose, argon2                                                                                    |
+| Web    | React 19, Vite 7, TypeScript, Tailwind CSS 4, Apollo Client, React Router 7, Motion, Radix (Dialog, Dropdown Menu), Sonner toasts, lucide icons, IndexedDB (via idb) for media, Figtree |
 
 <details>
 <summary><strong>Running from source</strong></summary>
@@ -240,6 +244,7 @@ The web app runs on http://localhost:5173. Vite proxies `/graphql`, including We
 | `npm run dev`         | API in watch mode plus the web dev server                               |
 | `npm run build`       | Compile the API and bundle the web app                                  |
 | `npm run lint`        | ESLint                                                                  |
+| `npm run format`      | Prettier, over the whole repo                                           |
 | `npm run typecheck`   | TypeScript checks for both apps                                         |
 | `npm test`            | Server integration tests (needs `DATABASE_URL_TEST`) and web unit tests |
 | `npm run e2e`         | Playwright tests in a real browser against the production-mode server   |
@@ -250,11 +255,28 @@ Tests use their own databases and never touch your development data: `DATABASE_U
 To build the image locally instead of pulling it: `docker build -t jessdek .`
 
 ```
-apps/server   Fastify + GraphQL API, Prisma schema and migrations, tests
-apps/web      React app
-e2e           Playwright tests and the screenshot generator
-Dockerfile    Builds the single runtime image
-docs/brand    The jessDek logo: final SVG and PNG exports, and the generator that draws them
+apps/server       Fastify + GraphQL API, Prisma schema and migrations, tests
+apps/web          React app
+e2e               Playwright tests and the screenshot generator
+Dockerfile        Builds the single runtime image
+docs/brand        The jessDek logo: final SVG and PNG exports, and the generator that draws them
+docs/screenshots  The pictures in this README, made by npm run screenshots
 ```
+
+Each feature was planned in a document at the repo root, and those documents explain the reasoning behind the code:
+
+| Document                                                                   | About                                                           |
+| -------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| [REFRACTOR.md](REFRACTOR.md)                                               | The v2 rewrite: TypeScript, PostgreSQL, GraphQL subscriptions   |
+| [MEDIA_PLAN.md](MEDIA_PLAN.md), [DIRCOM.md](DIRCOM.md)                     | Photos and videos, device to device, and how the transfer works |
+| [AVATAR_PLAN.md](AVATAR_PLAN.md)                                           | Character avatars                                               |
+| [CARDS_PLAN.md](CARDS_PLAN.md)                                             | User cards                                                      |
+| [REPLIES_PLAN.md](REPLIES_PLAN.md)                                         | Replies and reactions                                           |
+| [THEMES_PLAN.md](THEMES_PLAN.md)                                           | Chat themes and member colours                                  |
+| [REQUESTS_PLAN.md](REQUESTS_PLAN.md)                                       | Message requests and group invites                              |
+| [CARD_DECK_PLAN.md](CARD_DECK_PLAN.md), [CARD_LOADING.md](CARD_LOADING.md) | Discover: the deck, and how its cards load                      |
+| [DECK_QUALITY_PLAN.md](DECK_QUALITY_PLAN.md)                               | The deck's Full and Light quality                               |
+| [LOGO_PLAN.md](LOGO_PLAN.md)                                               | The jessDek logo                                                |
+| [QA_REPORT.md](QA_REPORT.md)                                               | A UI and UX test pass over every screen (November 2026)         |
 
 </details>

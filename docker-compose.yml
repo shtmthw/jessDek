@@ -35,6 +35,9 @@ services:
       # Photos and videos travel device to device and are never stored on the server.
       MEDIA_ENABLED: ${MEDIA_ENABLED:-true}
       MEDIA_RELAY: ${MEDIA_RELAY:-true}
+      # Size limits in MB. Leave empty for the defaults (20 for photos, 100 for videos).
+      MEDIA_MAX_IMAGE_MB: ${MEDIA_MAX_IMAGE_MB:-}
+      MEDIA_MAX_VIDEO_MB: ${MEDIA_MAX_VIDEO_MB:-}
       # JSON list of STUN/TURN servers. Leave empty for a public STUN server.
       ICE_SERVERS: ${ICE_SERVERS:-}
     ports:

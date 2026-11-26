@@ -1,0 +1,5 @@
+
+    -Add chat thems and group chat themse per person and per gc in it
+    -Add the card based interest based matching system to make new friends
+    -Plan out how can a card game be seamlessly intregated in the site
+    -Plan an app release on both IOS and Androids.
