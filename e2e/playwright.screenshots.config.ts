@@ -11,11 +11,17 @@ const DATABASE_URL =
 // Workers inherit it from the main process, which sets it first.
 process.env.SEED_PASSWORD ??= randomBytes(12).toString('base64url');
 
-// Reset + seed demo data before the server starts, so screenshots are reproducible.
+// Reset + seed demo data before the server starts, so screenshots are reproducible. The crowd
+// fills the Discover deck (its people are the same on every run).
 resetDatabase(DATABASE_URL);
 execSync('npx tsx apps/server/prisma/seed.ts', {
   cwd: root,
-  env: { ...process.env, DATABASE_URL, JWT_SECRET: 'screenshots-secret-screenshots' },
+  env: {
+    ...process.env,
+    DATABASE_URL,
+    JWT_SECRET: 'screenshots-secret-screenshots',
+    SEED_CROWD: '80',
+  },
   stdio: 'pipe',
 });
 

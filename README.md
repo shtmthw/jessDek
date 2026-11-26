@@ -10,7 +10,8 @@
 [![CI](https://github.com/shtmthw/jessDek/actions/workflows/ci.yml/badge.svg)](https://github.com/shtmthw/jessDek/actions/workflows/ci.yml)
 [![Docker Hub](https://img.shields.io/docker/pulls/matthew552/jessdek?label=docker%20hub)](https://hub.docker.com/r/matthew552/jessdek)
 
-<img src="docs/screenshots/desktop-chat-light.png" alt="jessDek on desktop" width="760">
+<img src="docs/screenshots/chat-desktop-light.png" alt="A group chat on desktop with the Matcha theme, member colours, a reply, reactions and someone typing, and a message request waiting above the chat list" width="620">
+<img src="docs/screenshots/chat-phone-dark.png" alt="A direct chat on a phone in dark mode with the Doodles theme, and photos and a video just sent" width="180">
 
 </div>
 
@@ -39,10 +40,11 @@ To stop, run `docker compose down`. Your data is kept in the `realtime_db` volum
 ## Features
 
 - **Instant delivery.** Messages, typing indicators, unread counts and online status arrive live over WebSockets, with no polling.
-- **Direct messages and group chats.** Find people by username with live search. A new chat starts as a [message request](#message-requests-and-group-invites) the other person accepts, and groups invite people instead of adding them. Rename or leave groups at any time.
-- **Photos and videos, device to device.** Sent straight between browsers over WebRTC and never stored on the server. They can be downloaded while someone who has them is online. Up to 10 per message, with a caption. In **Settings → Photos & videos** you choose what downloads by itself (everything, photos only, or nothing), see how much is kept on the device, and can turn on **Hide my IP address** to send media through the server instead.
-- **Replies and reactions.** Reply to any message and it arrives with a quote of the original; tap the quote to jump back to it. React with one emoji per person: six quick ones, or any emoji from a searchable picker. On phones, long-press a message for reactions and swipe it right to reply; on desktop, hover it or right-click. Reactions are quiet: no sound, and they never count as unread.
+- **Direct messages and group chats.** Find people by username with live search. A new chat starts as a [message request](#message-requests-and-group-invites), and groups invite people instead of adding them. Rename or leave groups at any time.
 - **Discover people.** A deck of cards from people who share at least one of your interests. Swipe through it, open someone's card and say hi with a suggested opener. See [Discover](#discover-the-card-deck).
+- **Photos and videos, device to device.** Sent straight between browsers over WebRTC and never stored on the server, up to 10 per message with a caption. They can be downloaded while someone who has them is online. In **Settings → Photos & videos** you choose what downloads by itself (everything, photos only, or nothing), see how much is kept on the device, and can turn on **Hide my IP address** to send media through the server instead.
+- **Replies and reactions.** Reply to any message and it arrives with a quote of the original; tap the quote to jump back to it. React with one emoji per person: six quick ones, or any emoji from a searchable picker. On phones, long-press a message for reactions and swipe it right to reply; on desktop, hover it or right-click. Reactions are quiet: no sound, and they never count as unread.
+- **Make it yours.** A [character avatar](#avatars), a [card](#cards) with your interests that anyone can open at `/@username`, and a [theme](#chat-themes) for every chat.
 - **You decide who reaches you.** Someone new can send you one text message, which you accept or decline, and a group can only invite you. Block someone and they can't message you, start a chat with you or add you to groups, and neither of you sees the other's online status. Mute any chat, remove a direct chat from your list, and (as a group's owner) remove members.
 - **Pleasant to use.** Messages appear immediately and retry if sending fails. Unread badges (and a count in the tab title), a "new messages" pill, infinite scroll through history, day separators and a reconnecting banner. A soft chime plays when something happens in a chat you're not looking at, with a gentler one for groups; preview the sounds or turn them off in **Settings → Sounds**. New accounts get a one-time welcome that points them to their avatar and card.
 - **Keyboard friendly.** `Ctrl/⌘ + K` starts a new chat, `/` searches your chats, `Alt + ↑/↓` switches between them and `Esc` closes one. Start typing anywhere in a chat and it lands in the message box. In the message list, the arrow keys walk the messages, `Enter` opens one's actions and `R` replies to it.
@@ -50,6 +52,40 @@ To stop, run `docker compose down`. Your data is kept in the `realtime_db` volum
 - **Smooth.** Soft spring animations that run on the compositor wherever they can, so dialogs, menus and the Discover deck stay fluid on modest hardware. If your device asks for reduced motion, jessDek uses less of it.
 - **Secure by default.** argon2id password hashing, httpOnly session cookies, rate limiting, input validation, and membership checks on every operation.
 - **One image.** The API and the web app ship together as `matthew552/jessdek`. The only other container is PostgreSQL.
+
+## Discover: the card deck
+
+The **compass** next to New chat opens **Discover**: a deck of cards from everyone who shares **at least one interest** with you (built-in interests by id, your own words without regard to case). People you blocked, or who blocked you, never appear.
+
+- **The front page** shows a stack. The card on top is where the deck starts, picked at random each time a deck is dealt. Tap it, or **Open the deck**.
+- **The deck** is a fan of five cards, the middle one largest. Swipe or drag it, use **← →**, the arrow buttons, or tap a side card to bring it to the middle. It's a circle in a fixed order, so going round brings you back. Decks of fewer than five cards don't loop: they stop at the ends. **Shuffle** deals again from someone else.
+- **Tap the middle card** to open it, with a box to say hi. Above the box are **suggested openers** written from the interests you share. Pick one (it fills the box, and you can change it) and send it. It goes out as an ordinary [message request](#message-requests-and-group-invites). If you already have a chat or a request with that person, the box says so instead. **Back to deck** returns to the same card without loading anything again.
+- **Full quality or Light.** Every card is drawn in full by default: stickers, patterns, finishes and shadows. **Light** draws simpler cards (the same colours, avatar and text) with snappier motion, which is much easier on older phones and laptops. Switch it with the feather button in the deck's header or in **Settings → Discover**. It's kept per device, and a card you open is always shown in full.
+
+<div align="center">
+
+<img src="docs/screenshots/discover-deck-dark.png" alt="The Discover deck on desktop in dark mode: a fan of five cards, each in a different style" width="620">
+<img src="docs/screenshots/discover-say-hi-phone-light.png" alt="One card opened from the deck on a phone, with suggested openers about a shared interest" width="180">
+
+</div>
+
+Cards load lazily from both ends of the deck: five each side to start, then five more whenever a side runs low, with at most ten kept each side. Decks of up to 21 people arrive in one go. Someone who blocks you while their card is already loaded drops out of the deck when you open it. The rules are in [CARD_LOADING.md](CARD_LOADING.md) and [DECK_QUALITY_PLAN.md](DECK_QUALITY_PLAN.md).
+
+To fill the decks locally, seed a crowd with `SEED_CROWD=80 npm run db:seed -w apps/server` (it also works on an already-seeded database). That's 80 people whose cards and avatars are drawn from every style option, each sharing interests with two of the demo users. Alice also gets a few interests, so every demo user has a full deck of 30 or more.
+
+## Message requests and group invites
+
+Nobody lands in your chats uninvited. A chat with someone new starts as a **request**, and a group only gets people who say yes.
+
+<img src="docs/screenshots/request-phone-light.png" alt="A message request on a phone: the one message, with Block, Decline and Accept where the composer would be" width="240" align="right">
+
+- **A new direct chat is a request.** Whoever starts it can send **one message, text only**: no photos, videos, replies or reactions. Then their composer is replaced by "Request sent · Erin can accept or decline". Chats you already had are unchanged, and once it is accepted a chat is an ordinary one.
+- **You see it under Requests.** A **Requests** row above your chats counts what is waiting (message requests and group invites together) and opens a list. Opening a request shows the message with **Accept**, **Decline** and **Block** where the composer would be. Looking at it tells the sender nothing.
+- **The sender finds out.** Accepting turns the request into an ordinary chat for both people, and the sender gets a toast ("Erin accepted your message request") while their composer switches over live. After a decline their chat says so and they can't send another. **A decline is final**: it only opens up again if the person who declined starts a chat themselves. Blocking from a request declines it, and the sender sees the same thing as for any decline.
+- **Groups invite instead of adding.** Creating a group, or inviting people later, sends invites. An invite shows the group's name, who invited you and who is in it, but none of its messages, with **Join group** and **Decline**. The inviter gets a toast with the answer, and **Group info** lists who is still invited and who declined. The person who sent an invite, or the group's owner, can take it back while it is pending. A declined invite is final for that group.
+- **Quiet and private.** Requests and invites make no sound and don't count in the tab title. Until a request is accepted, the two people see nothing of each other: no online status, typing or profile changes. Someone can reach out to at most 20 new people an hour, counting requests and invites together.
+
+<br clear="right">
 
 ## Avatars
 
@@ -59,96 +95,38 @@ Everyone has a cartoon character as their avatar, drawn head and shoulders on th
 - **Hair:** 36 styles in 16 colours (long styles tuck behind the ears and fall over the shoulders), and hair clips.
 - **Wardrobe:** 26 hats and headwear, 21 tops, 13 neck accessories, glasses, 8 earrings, and 19 colours for hats, tops, neck items, clips and earrings.
 - **A little pet** on your shoulder: a cat, puppy, chick, bunny, frog, ghost, hamster or bear.
-
-**Specials** are nine ready-made characters in a finer, softer style: thin lines, doe eyes and tiny mouths, with beanies, headphones, bead necklaces, a checkered sweater and more. Pick one in the studio's Specials tab, then change anything in the other tabs as usual. The **Fine** line weight works on any look.
+- **Specials:** nine ready-made characters in a finer, softer style (thin lines, doe eyes and tiny mouths, with beanies, headphones, bead necklaces and more). Pick one, then change anything in the other tabs as usual. The **Fine** line weight works on any look.
 
 The studio has undo (`Ctrl/⌘ + Z`) and a randomize button. Unsaved changes wait on your device until you come back. If you'd rather not have a character, you can show your initials instead.
 
-Avatars are drawn in the browser as SVG. The server stores only a small "recipe" naming the chosen items (at most 1 KiB of JSON), so there are no image uploads. A change shows up straight away for everyone who shares a chat with you.
-
-<div align="center">
-
-<img src="docs/screenshots/avatar-studio-light.png" alt="The avatar studio on a desktop: a live preview beside a grid of hats" width="620">
-<img src="docs/screenshots/avatar-studio-phone-dark.png" alt="The avatar studio on a phone, dark theme" width="190">
-<img src="docs/screenshots/avatar-specials-light.png" alt="The avatar studio's Specials tab: nine ready-made characters with fine lines" width="620">
-
-</div>
-
 ## Cards
 
-Everyone has a **card**: a portrait card with their `@username`, their avatar, up to six interests and a short "about me", plus a **Message** button. Tap someone in a chat header, a group's member list, a group message or New chat search to see theirs. Design your own in **Settings → Your card**:
+Everyone has a **card**: a portrait card with their `@username`, their avatar, up to six interests and a short "about me", plus a **Message** button. Tap someone in a chat header, a group's member list, a group message or New chat search to see theirs. Your interests are also what [Discover](#discover-the-card-deck) matches on. Design your own in **Settings → Your card**:
 
 - **Words:** an about of up to 150 characters, and interests picked from about 100 built-in ones, or your own with an emoji.
 - **Look:** solid and gradient backgrounds, patterns, borders and corners, finishes (gloss, holographic, glitter, paper), four layouts, seven fonts, dividers, interest and button styles, and a frame and ring for your avatar.
 - **Stickers:** up to eight, drawn in the avatar style or any emoji. Drag them anywhere, resize and turn them, or pinch on a phone.
 
-Every card is the same size, so long text shrinks to fit. Each card has a link, `/@username`. People on jessDek can always open it; turn on **Share my card** and anyone can, even without an account. Their Message button asks them to sign in or sign up, then opens the chat with you. Like avatars, cards are drawn in the browser from a small recipe (at most 4 KiB of JSON).
+Every card is the same size, so long text shrinks to fit. Each card has a link, `/@username`. People on jessDek can always open it; turn on **Share my card** and anyone can, even without an account. Their Message button asks them to sign in or sign up, then opens the chat with you.
 
 <div align="center">
 
-<img src="docs/screenshots/card-studio-light.png" alt="The card studio on a desktop: a live card preview beside sticker options" width="620">
-<img src="docs/screenshots/card-studio-phone-dark.png" alt="The card studio on a phone, dark theme" width="190">
-<img src="docs/screenshots/card-public-light.png" alt="Bob's shared card, opened by someone who isn't signed in" width="620">
+<img src="docs/screenshots/avatar-studio-desktop-light.png" alt="The avatar studio on desktop: a live preview with a flower crown and a bunny, beside a grid of headwear" width="620">
+<img src="docs/screenshots/card-studio-phone-dark.png" alt="The card studio on a phone in dark mode: a peach card with hearts and stickers" width="180">
 
 </div>
 
 ## Chat themes
 
-Every chat, direct or group, can have a **theme**: a wallpaper of soft colour with fine-line doodles in the avatar style, an accent for your bubbles, the send button and links, and a bubble style. Open a chat's menu and pick **Theme**. The chat behind the sheet shows each choice live, and closing without saving keeps the old theme.
+Every chat, direct or group, can have a **theme**: a wallpaper of soft colour with fine-line doodles in the avatar style, an accent for your bubbles, the send button and links, and a bubble style. Open a chat's menu and pick **Theme**. The chat behind the sheet shows each choice live, and closing without saving keeps the old theme. The pictures at the top show Matcha in a group and Doodles in a direct chat.
 
-- **Shared.** Everyone in the chat sees the same theme, and anyone in it can change it. The chat then shows a quiet line such as "Alice changed the theme to Matcha · Change", and the chat list mentions it too. Like reactions, a theme change makes no sound and doesn't count as unread.
+- **Shared.** Everyone in the chat sees the same theme, and anyone in it can change it. The chat then shows a quiet line such as "Carol changed the theme to Matcha · Change", and the chat list mentions it too. Like reactions, a theme change makes no sound and doesn't count as unread.
 - **17 presets:** Classic (the default look), Doodles, Blush, Matcha, Lemonade, Ocean, Lavender, Peach, Candy, Snacks, Space, Pets, Sunset, Notebook, Arcade, Soda and Mixtape.
 - **Custom:** choose from 14 accents and 19 wallpapers (solids and gradients). Add one of 16 doodle patterns, from simple hearts, stars and waves to line-art scatters of snacks, pets, space and music. Then pick a bubble style: **solid**, **soft** (a light wash of the accent) or **outline** (a thin ink outline, like a sticker).
 - **Light and dark.** Every theme has a hand-tuned dark version and follows the app's light or dark setting. A contrast test checks the text in every preset and custom combination, in both modes.
 - **Member colours in groups.** Each member gets their own colour for their name, a tint on their bubbles, and the bar of a quote of their messages. Colours are assigned from a palette of 10 in join order, and anyone can pick their own for that group in **Group info → Your colour**.
 
-Like avatars and cards, a theme is a small recipe (at most 512 bytes of JSON) stored on the chat and drawn by the browser. Chats nobody has themed keep the Classic look.
-
-<div align="center">
-
-<img src="docs/screenshots/theme-sheet-light.png" alt="The theme sheet over a direct chat, showing the preset tiles" width="620">
-<img src="docs/screenshots/group-theme-dark.png" alt="A group chat with the Matcha theme and member colours, dark theme" width="620">
-
-</div>
-
-## Message requests and group invites
-
-Nobody lands in your chats uninvited. A chat with someone new starts as a **request**, and a group only gets people who say yes.
-
-- **A new direct chat is a request.** Whoever starts it can send **one message, text only**: no photos, videos, replies or reactions. Then their composer is replaced by "Request sent · Erin can accept or decline". Chats you already had are unchanged, and once it is accepted a chat is an ordinary one.
-- **You see it under Requests.** A **Requests** row above your chats counts what is waiting (message requests and group invites together) and opens a list. Opening a request shows the message with **Accept**, **Decline** and **Block** where the composer would be. Looking at it tells the sender nothing.
-- **The sender finds out.** Accepting turns the request into an ordinary chat for both people, and the sender gets a toast ("Erin accepted your message request") while their composer switches over live. After a decline their chat says so and they can't send another. **A decline is final**: it only opens up again if the person who declined starts a chat themselves. Blocking from a request declines it, and the sender sees the same thing as for any decline.
-- **Groups invite instead of adding.** Creating a group, or inviting people later, sends invites. An invite shows the group's name, who invited you and who is in it, but none of its messages, with **Join group** and **Decline**. The inviter gets a toast with the answer, and **Group info** lists who is still invited and who declined. The person who sent an invite, or the group's owner, can take it back while it is pending. A declined invite is final for that group.
-- **Quiet and private.** Requests and invites make no sound and don't count in the tab title. Until a request is accepted, the two people see nothing of each other: no online status, typing or profile changes. Someone can reach out to at most 20 new people an hour, counting requests and invites together.
-
-## Discover: the card deck
-
-The **compass** next to New chat opens **Discover**: a deck of cards from everyone who shares **at least one interest** with you (built-in interests by id, your own words without regard to case). People you blocked, or who blocked you, never appear.
-
-- **The deck's front page** shows a stack. The card on top is where the deck starts, picked at random each time a deck is dealt. Tap it, or **Open the deck**.
-- **The deck** is a fan of five cards, the middle one largest. Swipe or drag it, use **← →**, the arrow buttons, or tap a side card to bring it to the middle. It's a circle in a fixed order, so going round brings you back. Decks of fewer than five cards don't loop: they stop at the ends. **Shuffle** deals again from someone else.
-- **Tap the middle card** to open it, with a box to say hi. Above the box are **suggested openers** written from the interests you share. Pick one (it fills the box, and you can change it) and send it. It goes out as an ordinary [message request](#message-requests-and-group-invites). If you already have a chat or a request with that person, the box says so instead.
-- **Back to deck** returns to the same card without loading anything again.
-- **Full quality or Light.** Every card is drawn in full by default: stickers, patterns, finishes and shadows. **Light** draws simpler cards (the same colours, avatar and text) with snappier motion, which is much easier on older phones and laptops. Switch it with the feather button in the deck's header or in **Settings → Discover**. It's kept per device, and a card you open is always shown in full. See [DECK_QUALITY_PLAN.md](DECK_QUALITY_PLAN.md).
-
-Cards load lazily from both ends of the deck: five each side to start, then five more whenever a side runs low, with at most ten kept each side. Decks of up to 21 people arrive in one go. Someone who blocks you while their card is already loaded drops out of the deck when you open it. To fill the decks locally, seed a crowd with `SEED_CROWD=80 npm run db:seed -w apps/server` (it also works on an already-seeded database). That's 80 people whose cards and avatars are drawn from every style option, each sharing interests with two of the demo users. Alice also gets a few interests, so every demo user has a full deck of 30 or more. The rules are in [CARD_LOADING.md](CARD_LOADING.md).
-
-## Screenshots
-
-<div align="center">
-
-<img src="docs/screenshots/mobile-list-light.png" alt="Chat list on a phone" width="190">
-<img src="docs/screenshots/mobile-chat-light.png" alt="Conversation on a phone" width="190">
-<img src="docs/screenshots/mobile-chat-dark.png" alt="Conversation on a phone, dark theme" width="190">
-<img src="docs/screenshots/mobile-list-dark.png" alt="Chat list on a phone, dark theme" width="190">
-
-</div>
-
-| Light                                                          | Dark                                                                      |
-| -------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| ![Group chat](docs/screenshots/desktop-group-light.png)        | ![Group chat, dark theme](docs/screenshots/desktop-group-dark.png)        |
-| ![Photos and videos](docs/screenshots/desktop-media-light.png) | ![Photos and videos, dark theme](docs/screenshots/desktop-media-dark.png) |
-| ![Sign up](docs/screenshots/auth-light.png)                    | ![Direct message, dark theme](docs/screenshots/desktop-chat-dark.png)     |
+Chats nobody has themed keep the Classic look.
 
 ## Configuration
 
@@ -183,7 +161,7 @@ Your data lives in the `realtime_db` volume and is kept across updates.
 
 jessDek used to be called Realtime, and its image was `matthew552/realtime`. That image no longer gets updates. To switch, download the new `docker-compose.yml` (it only changes the image name) and run the two commands above. Your accounts, chats and settings stay, because the database and its volume are unchanged.
 
-## Upgrading from v1
+### Upgrading from v1
 
 v2 is a full rewrite (TypeScript, PostgreSQL, GraphQL subscriptions). The data model changed, so v1 MySQL data is **not** migrated. See [REFRACTOR.md](REFRACTOR.md) for the plan and the reasoning behind it.
 
@@ -239,18 +217,18 @@ npm run dev
 
 The web app runs on http://localhost:5173. Vite proxies `/graphql`, including WebSockets, to the API on port 4000.
 
-| Command               | What it does                                                            |
-| --------------------- | ----------------------------------------------------------------------- |
-| `npm run dev`         | API in watch mode plus the web dev server                               |
-| `npm run build`       | Compile the API and bundle the web app                                  |
-| `npm run lint`        | ESLint                                                                  |
-| `npm run format`      | Prettier, over the whole repo                                           |
-| `npm run typecheck`   | TypeScript checks for both apps                                         |
-| `npm test`            | Server integration tests (needs `DATABASE_URL_TEST`) and web unit tests |
-| `npm run e2e`         | Playwright tests in a real browser against the production-mode server   |
-| `npm run screenshots` | Regenerate `docs/screenshots` from seeded demo data                     |
+| Command               | What it does                                                                         |
+| --------------------- | ------------------------------------------------------------------------------------ |
+| `npm run dev`         | API in watch mode plus the web dev server                                            |
+| `npm run build`       | Compile the API and bundle the web app                                               |
+| `npm run lint`        | ESLint                                                                               |
+| `npm run format`      | Prettier, over the whole repo                                                        |
+| `npm run typecheck`   | TypeScript checks for both apps                                                      |
+| `npm test`            | Server integration tests (needs `DATABASE_URL_TEST`) and web unit tests              |
+| `npm run e2e`         | Playwright tests in a real browser against the production-mode server                |
+| `npm run screenshots` | Regenerate the seven pictures in `docs/screenshots` from seeded demo data and a crowd |
 
-Tests use their own databases and never touch your development data: `DATABASE_URL_TEST` for the server tests and `DATABASE_URL_E2E` for Playwright. Both default to `localhost:55432` (see `apps/server/vitest.config.ts` and `e2e/server.ts`).
+Tests use their own databases and never touch your development data: `DATABASE_URL_TEST` for the server tests, `DATABASE_URL_E2E` for Playwright and `DATABASE_URL_SHOTS` for the screenshots. They default to `localhost:55432` (see `apps/server/vitest.config.ts`, `e2e/server.ts` and `e2e/playwright.screenshots.config.ts`). The e2e tests and the screenshots run against the built web app, so run `npm run build` first.
 
 To build the image locally instead of pulling it: `docker build -t jessdek .`
 
