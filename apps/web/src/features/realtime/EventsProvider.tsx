@@ -29,7 +29,7 @@ import { CONVERSATIONS, EVENTS, MARK_READ, MESSAGE_FIELDS, type Message } from '
 import { isOwnConversationExpected, playSound, primeAudio } from '@/lib/sounds';
 import { applyInvite, firstName, isIncomingRequest } from '../requests/inbox';
 import { useViewer } from '../session/ViewerProvider';
-import { getActiveConversation } from './active';
+import { getActiveConversation, isOnChat } from './active';
 import { clearTyping, markTyping } from './typing';
 
 type AnyClient = ApolloClient<object>;
@@ -169,7 +169,7 @@ export function EventsProvider({ children }: { children: ReactNode }) {
         case 'ConversationUpdated':
           if (event.conversation?.hidden) {
             // You removed this chat on another device.
-            const viewing = getActiveConversation() === event.conversationId;
+            const viewing = isOnChat(event.conversationId);
             removeConversation(client, event.conversationId);
             if (viewing) navigateRef.current('/', { replace: true });
           } else if (event.conversation) {
@@ -183,7 +183,7 @@ export function EventsProvider({ children }: { children: ReactNode }) {
               playSound(event.conversation.type === 'GROUP' ? 'addedToGroup' : 'newChat');
             upsertConversation(client, event.conversation);
           } else {
-            const viewing = getActiveConversation() === event.conversationId;
+            const viewing = isOnChat(event.conversationId);
             removeConversation(client, event.conversationId);
             void forgetConversation(event.conversationId);
             if (viewing) navigateRef.current('/', { replace: true });

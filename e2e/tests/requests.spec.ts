@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { inviteToGroup, newUser, openDirect, send, unique } from './helpers';
+import { inviteToGroup, newUser, openDirect, send, signUp, unique } from './helpers';
 
 /**
  * Message requests (a new direct chat: one text message until the other person accepts) and
@@ -141,6 +141,52 @@ test('the sender is told when a request is declined, and can’t send another', 
 
   await a.context.close();
   await b.context.close();
+});
+
+test('declining stays on Requests when the live update arrives late', async ({ browser }) => {
+  // On a slow machine the "request gone" event can reach Bob just after the Decline response,
+  // while the request is still on screen. It must not send him to the home screen. Hold that
+  // event until the response is in, and slow Bob's CPU down, to make the timing certain.
+  const a = await newUser(browser, unique('alice'));
+  const context = await browser.newContext({ viewport: { width: 1100, height: 760 } });
+  let holding = false;
+  const held: (() => void)[] = [];
+  await context.routeWebSocket(/\/graphql/, (ws) => {
+    const server = ws.connectToServer();
+    server.onMessage((m) => {
+      if (holding && String(m).includes('ConversationUpdated')) held.push(() => ws.send(m));
+      else ws.send(m);
+    });
+    ws.onMessage((m) => server.send(m));
+  });
+  const page = await context.newPage();
+  const b = { page, username: unique('bob') };
+  await signUp(page, b.username);
+  await openDirect(a.page, b.username);
+  await send(a.page, 'hello?');
+  await expect(requestsRow(page, 1)).toBeVisible();
+  await openRequestFrom(page, a.username);
+  await expect(requestBar(page).getByRole('button', { name: 'Decline' })).toBeVisible();
+
+  const cdp = await context.newCDPSession(page);
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 8 });
+  holding = true;
+  const answered = page.waitForResponse((r) =>
+    /respondToRequest/.test(r.request().postData() ?? ''),
+  );
+  await requestBar(page).getByRole('button', { name: 'Decline' }).click();
+  await (await answered).finished();
+  holding = false;
+  for (const release of held.splice(0)) release();
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+
+  await expect(page.getByText('No requests')).toBeVisible();
+  await page.waitForTimeout(1000); // the late event has been handled by now
+  await expect(page).toHaveURL(/\/requests$/);
+  await expect(page.getByText('No requests')).toBeVisible();
+
+  await a.context.close();
+  await context.close();
 });
 
 test('blocking from a request declines it, and tells the sender the same', async ({ browser }) => {
